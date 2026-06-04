@@ -1,0 +1,45 @@
+name: "Build App"
+description: "Set up Node.js, install dependencies, lint, test (with coverage), and build"
+
+# Composite action — step-level reuse. Runs INSIDE the caller's job/runner.
+# Every `run:` step must declare `shell:` explicitly (composites do not inherit a default shell).
+
+inputs:
+  node-version:
+    description: "Node.js version"
+    required: false
+    default: "20"
+  working-directory:
+    description: "Directory to run the build in"
+    required: false
+    default: "."
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: "npm"
+        cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: npm ci
+
+    - name: Lint
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: npm run lint
+
+    - name: Test (with coverage)
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: npm test
+
+    - name: Build
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: npm run build
