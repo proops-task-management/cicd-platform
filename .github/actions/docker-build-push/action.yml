@@ -1,0 +1,60 @@
+name: "Docker Build and Push"
+description: "Build a multi-arch docker image and optionally push to a registry (gated by push input)"
+
+# Composite action — step-level reuse. Models Day 24's build-image job:
+# QEMU + buildx for multi-arch, login gated by push, two tags (SHA + latest).
+
+inputs:
+  registry:
+    description: "Container registry"
+    required: false
+    default: "ghcr.io"
+  image-name:
+    description: "Full image name without tag (e.g. owner/repo)"
+    required: true
+  image-tag:
+    description: "Image tag (recommended: commit SHA)"
+    required: true
+  push:
+    description: "Push to registry (true) or build-only (false)"
+    required: false
+    default: "false"
+  platforms:
+    description: "Target platforms for multi-arch build"
+    required: false
+    default: "linux/amd64,linux/arm64"
+  registry-username:
+    description: "Registry username"
+    required: false
+  registry-password:
+    description: "Registry password / token"
+    required: false
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to registry
+      if: inputs.push == 'true'
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ inputs.registry }}
+        username: ${{ inputs.registry-username }}
+        password: ${{ inputs.registry-password }}
+
+    - name: Build and push
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        push: ${{ inputs.push }}
+        platforms: ${{ inputs.platforms }}
+        tags: |
+          ${{ inputs.registry }}/${{ inputs.image-name }}:${{ inputs.image-tag }}
+          ${{ inputs.registry }}/${{ inputs.image-name }}:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
