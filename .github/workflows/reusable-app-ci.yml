@@ -1,10 +1,9 @@
 name: Reusable App CI
 
-# Reusable workflow — job-level reuse. Called by service repos via:
-#   uses: proops-task-management/cicd-platform/.github/workflows/reusable-app-ci.yml@v1
-# Composite actions are referenced by ABSOLUTE path (not ./) because when this
-# workflow runs from a caller repo, checkout pulls the CALLER's code, so a
-# relative ./ path would 404. Pin the composites to the same tag as the workflow.
+# Reusable workflow (v2) — production-grade: parallel jobs gated by an aggregate
+# `ci-success` job. Service callers require ONLY `app-ci / ci-success` in their
+# ruleset, so the platform can add/remove internal jobs without any service editing
+# its ruleset. Composites referenced by ABSOLUTE @v2 path (./ 404s when called externally).
 
 on:
   workflow_call:
@@ -22,40 +21,87 @@ on:
         type: boolean
         default: false
       working-directory:
-        description: "Where the app lives in the service repo"
         type: string
         default: "."
+      enable-sonar:
+        description: "Run the SonarCloud quality gate (requires SONAR_TOKEN secret)"
+        type: boolean
+        default: false
     secrets:
       REGISTRY_USERNAME:
         required: false
       REGISTRY_TOKEN:
         required: false
+      SONAR_TOKEN:
+        required: false
 
 jobs:
   build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build app (lint + test + build)
+        uses: proops-task-management/cicd-platform/.github/actions/build-app@v2
+        with:
+          node-version: ${{ inputs.runtime-version }}
+          working-directory: ${{ inputs.working-directory }}
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: ${{ inputs.working-directory }}/coverage/
+          if-no-files-found: ignore
+
+  sonar:
+    needs: build
+    if: ${{ inputs.enable-sonar }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so SonarCloud can compute "new code" (Day 26 lesson).
+          fetch-depth: 0
+      - name: Download coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+      - name: SonarCloud scan
+        uses: proops-task-management/cicd-platform/.github/actions/sonar-scan@v2
+        with:
+          sonar-token: ${{ secrets.SONAR_TOKEN }}
+
+  image:
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
-      - name: Checkout caller repo
-        uses: actions/checkout@v4
-
-      - name: Build app (lint + test + build)
-        uses: proops-task-management/cicd-platform/.github/actions/build-app@v1
-        with:
-          node-version: ${{ inputs.runtime-version }}
-          working-directory: ${{ inputs.working-directory }}
-
+      - uses: actions/checkout@v4
       - name: Docker build + push (multi-arch GHCR)
-        uses: proops-task-management/cicd-platform/.github/actions/docker-build-push@v1
+        uses: proops-task-management/cicd-platform/.github/actions/docker-build-push@v2
         with:
           registry: ghcr.io
-          # GHCR image must live under the caller's owner namespace for GITHUB_TOKEN to push.
           image-name: ${{ github.repository }}
           image-tag: ${{ inputs.image-tag }}
           push: ${{ inputs.push-image }}
-          # Good defaults: fall back to the auto GITHUB_TOKEN (works for GHCR) if the
-          # caller didn't configure explicit registry secrets.
           registry-username: ${{ secrets.REGISTRY_USERNAME || github.actor }}
           registry-password: ${{ secrets.REGISTRY_TOKEN || secrets.GITHUB_TOKEN }}
+
+  # Aggregate gate — the ONLY required check in the service ruleset. Add/remove
+  # jobs above without ever touching the ruleset again. `if: always()` so it runs
+  # even when an upstream job failed; a `skipped` sonar (disabled) is not a failure.
+  ci-success:
+    needs: [build, sonar, image]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any required job did not succeed
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          echo "build=${{ needs.build.result }} sonar=${{ needs.sonar.result }} image=${{ needs.image.result }}"
+          echo "A required job did not succeed."
+          exit 1
+      - name: All required jobs passed
+        run: echo "build=${{ needs.build.result }} sonar=${{ needs.sonar.result }} image=${{ needs.image.result }} — OK"

@@ -1,0 +1,30 @@
+name: "SonarCloud Scan"
+description: "Run SonarCloud analysis (reads sonar-project.properties from repo root; expects coverage/ present)"
+
+# Composite action — wraps Day 26's SonarCloud step so every service inherits the
+# quality gate by upgrading the platform. Composites have no `secrets` context, so
+# the token comes in as an input value (the reusable workflow forwards secrets.SONAR_TOKEN).
+
+inputs:
+  sonar-token:
+    description: "SonarCloud token"
+    required: true
+  sonar-host-url:
+    description: "Sonar host URL"
+    required: false
+    default: "https://sonarcloud.io"
+
+runs:
+  using: "composite"
+  steps:
+    - name: SonarCloud Scan
+      uses: SonarSource/sonarqube-scan-action@v4
+      with:
+        # Wait for the quality gate and FAIL this job if it fails. This moves
+        # enforcement from "ruleset requires SonarCloud's external status" to
+        # "the sonar job fails → the ci-success aggregate fails → merge blocked".
+        args: >
+          -Dsonar.qualitygate.wait=true
+      env:
+        SONAR_TOKEN: ${{ inputs.sonar-token }}
+        SONAR_HOST_URL: ${{ inputs.sonar-host-url }}
