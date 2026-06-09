@@ -1,0 +1,71 @@
+name: Reusable IaC
+
+# Reusable workflow — job-level reuse for Terraform. Called by service repos via:
+#   uses: proops-task-management/cicd-platform/.github/workflows/reusable-iac.yml@v1
+# One reusable workflow drives plan / apply / destroy via the `action` input.
+
+on:
+  workflow_call:
+    inputs:
+      action:
+        description: "plan | apply | destroy"
+        type: string
+        required: true
+      environment:
+        description: "dev | test | prod"
+        type: string
+        default: "dev"
+      working-directory:
+        description: "Terraform root config directory"
+        type: string
+        default: "iac/dev"
+      aws-region:
+        type: string
+        default: "ap-southeast-1"
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+
+jobs:
+  iac:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout caller repo
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Init
+        working-directory: ${{ inputs.working-directory }}
+        run: terraform init
+
+      - name: Validate
+        working-directory: ${{ inputs.working-directory }}
+        run: terraform validate
+
+      - name: Plan
+        if: inputs.action == 'plan' || inputs.action == 'apply'
+        working-directory: ${{ inputs.working-directory }}
+        run: terraform plan -no-color -out=tfplan
+
+      - name: Apply
+        if: inputs.action == 'apply'
+        working-directory: ${{ inputs.working-directory }}
+        run: terraform apply -auto-approve -no-color tfplan
+
+      - name: Destroy
+        if: inputs.action == 'destroy'
+        working-directory: ${{ inputs.working-directory }}
+        run: terraform destroy -auto-approve -no-color
