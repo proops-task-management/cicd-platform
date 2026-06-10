@@ -1,0 +1,97 @@
+name: Reusable Deploy
+
+# Reusable workflow (v3) — the "deploy many" half of the Day 29 promotion model.
+# Takes an already-built image SHA + a target environment and rolls it out.
+# It NEVER builds: it promotes the exact bytes reusable-build.yml pushed to GHCR.
+#
+# kind-in-CI variant: each call spins up a throwaway kind cluster on the runner,
+# so no persistent external cluster is required. KUBE_CONFIG_DATA is kept as an
+# OPTIONAL secret (unused here) so this file is one edit away from a real cluster.
+
+on:
+  workflow_call:
+    inputs:
+      image-tag:
+        description: "Commit SHA to promote (must already exist in GHCR)"
+        type: string
+        required: true
+      environment:
+        description: "Target environment: dev | staging | prod"
+        type: string
+        required: true
+      project-name:
+        description: "GHCR namespace / image owner"
+        type: string
+        required: true
+      service-name:
+        description: "Image + Deployment name"
+        type: string
+        required: true
+    secrets:
+      KUBE_CONFIG_DATA:
+        description: "base64 kubeconfig for a REAL external cluster. Unused by kind-in-CI; present so this workflow is production-ready with one step change."
+        required: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # `environment:` resolves THIS env's scoped secrets and stamps the run with
+    # the environment badge in the Actions UI. Same ${{ secrets.X }} reference,
+    # different value per env. This is what makes the 3 GitHub Environments matter.
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      # Checkout the CALLER repo (the service) — provides the k8s/ baseline manifests.
+      - uses: actions/checkout@v4
+
+      - name: Create throwaway kind cluster (one per env, per run)
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: ${{ inputs.environment }}
+
+      - name: Create namespace
+        run: |
+          kubectl create namespace ${{ inputs.environment }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Create GHCR image pull secret
+        # deployment.yaml references imagePullSecrets: ghcr-creds. The GHCR image
+        # is private, so kind needs this docker-registry secret to pull it.
+        # Minted from the auto GITHUB_TOKEN (packages: read).
+        run: |
+          kubectl -n ${{ inputs.environment }} create secret docker-registry ghcr-creds \
+            --docker-server=ghcr.io \
+            --docker-username=${{ github.actor }} \
+            --docker-password=${{ secrets.GITHUB_TOKEN }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply baseline manifests
+        run: kubectl -n ${{ inputs.environment }} apply -f k8s/
+
+      - name: Promote image @${{ inputs.image-tag }} to ${{ inputs.environment }}
+        # set image (NOT rebuild, NOT apply a new tag baked in YAML): take the
+        # existing Deployment and re-point it at the promoted SHA. Identical command
+        # for dev / staging / prod — only inputs differ. rollout status blocks until
+        # the new pod is Ready, forcing a real image pull = proof the SHA runs.
+        run: |
+          kubectl -n ${{ inputs.environment }} set image \
+            deployment/${{ inputs.service-name }} \
+            ${{ inputs.service-name }}=ghcr.io/${{ inputs.project-name }}/${{ inputs.service-name }}:${{ inputs.image-tag }}
+          kubectl -n ${{ inputs.environment }} rollout status \
+            deployment/${{ inputs.service-name }} --timeout=180s
+
+      - name: PROOF — image running in ${{ inputs.environment }}
+        # This block IS the per-env evidence (screenshot this job log).
+        run: |
+          echo "=== ${{ inputs.environment }} ==="
+          kubectl -n ${{ inputs.environment }} get pods -l app=${{ inputs.service-name }} \
+            -o jsonpath='{range .items[*]}{.metadata.name}{"  "}{.spec.containers[0].image}{"  "}{.status.phase}{"\n"}{end}'
+          echo "--- describe (Image line) ---"
+          kubectl -n ${{ inputs.environment }} describe pod -l app=${{ inputs.service-name }} \
+            | grep -E "Image:|Status:" | head -n 6
+          {
+            echo "### Deployed to ${{ inputs.environment }}"
+            echo "Image: \`ghcr.io/${{ inputs.project-name }}/${{ inputs.service-name }}:${{ inputs.image-tag }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

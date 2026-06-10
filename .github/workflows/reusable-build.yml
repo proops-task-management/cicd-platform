@@ -1,0 +1,75 @@
+name: Reusable Build
+
+# Reusable workflow (v3) — the "build once" half of the Day 29 promotion model.
+# Runs lint + test + build, then builds a multi-arch image tagged by the commit
+# SHA and pushes it to GHCR ONE time. The SHA is surfaced to the caller via the
+# workflow-level `outputs.image-tag` so every environment can promote the SAME
+# bytes. Composites are referenced by ABSOLUTE @v3 path (./ 404s when called
+# externally), consistent with Day 28's reusable-app-ci.yml.
+
+on:
+  workflow_call:
+    inputs:
+      runtime-version:
+        description: "Node.js version"
+        type: string
+        default: "20"
+      working-directory:
+        type: string
+        default: "."
+      project-name:
+        description: "GHCR namespace / image owner (e.g. proops-task-management)"
+        type: string
+        required: true
+      service-name:
+        description: "Image name under the project (e.g. frontend-service)"
+        type: string
+        required: true
+    outputs:
+      image-tag:
+        description: "The commit SHA used as the image tag — promote this everywhere"
+        # Workflow-level output: the ONLY way a value leaves a reusable workflow.
+        # It points at the job-level output, which points at the step output.
+        value: ${{ jobs.build.outputs.image-tag }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    # Job-level output: relays the step output up so the workflow output can read it.
+    outputs:
+      image-tag: ${{ steps.set-tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build app (lint + test + build)
+        uses: proops-task-management/cicd-platform/.github/actions/build-app@v3
+        with:
+          node-version: ${{ inputs.runtime-version }}
+          working-directory: ${{ inputs.working-directory }}
+
+      - id: set-tag
+        name: Compute image tag from commit SHA
+        # Step output: the single place the SHA is computed. Everything else
+        # references steps.set-tag.outputs.tag so there is one source of truth.
+        run: echo "tag=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Docker build + push (multi-arch GHCR)
+        uses: proops-task-management/cicd-platform/.github/actions/docker-build-push@v3
+        with:
+          registry: ghcr.io
+          image-name: ${{ inputs.project-name }}/${{ inputs.service-name }}
+          image-tag: ${{ steps.set-tag.outputs.tag }}
+          push: "true"
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Record SHA in run summary
+        run: |
+          {
+            echo "### Build complete — promote this SHA"
+            echo "Image tag: \`${{ steps.set-tag.outputs.tag }}\`"
+            echo "Image: \`ghcr.io/${{ inputs.project-name }}/${{ inputs.service-name }}:${{ steps.set-tag.outputs.tag }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
