@@ -1,11 +1,12 @@
 name: Reusable Build
 
-# Reusable workflow (v3) — the "build once" half of the Day 29 promotion model.
-# Runs lint + test + build, then builds a multi-arch image tagged by the commit
-# SHA and pushes it to GHCR ONE time. The SHA is surfaced to the caller via the
-# workflow-level `outputs.image-tag` so every environment can promote the SAME
-# bytes. Composites are referenced by ABSOLUTE @v3 path (./ 404s when called
-# externally), consistent with Day 28's reusable-app-ci.yml.
+# Reusable workflow (v4) — the "build once" half of the Day 29 promotion model.
+# Runs lint + test + build, then builds a linux/amd64 image tagged by the commit
+# SHA and pushes it to GHCR ONE time (amd64-only: k3s nodes are amd64; Day 35
+# dropped the fragile arm64-under-QEMU leg). The SHA is surfaced to the caller via
+# the workflow-level `outputs.image-tag` so every environment can promote the SAME
+# bytes. Composites are referenced by ABSOLUTE @v4 path (./ 404s when called
+# externally), consistent with reusable-app-ci.yml.
 
 on:
   workflow_call:
@@ -52,7 +53,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build app (lint + test + build)
-        uses: proops-task-management/cicd-platform/.github/actions/build-app@v3
+        uses: proops-task-management/cicd-platform/.github/actions/build-app@v4
         with:
           node-version: ${{ inputs.runtime-version }}
           working-directory: ${{ inputs.working-directory }}
@@ -70,8 +71,8 @@ jobs:
         # references steps.set-tag.outputs.tag so there is one source of truth.
         run: echo "tag=${{ github.sha }}" >> "$GITHUB_OUTPUT"
 
-      - name: Docker build + push (multi-arch GHCR)
-        uses: proops-task-management/cicd-platform/.github/actions/docker-build-push@v3
+      - name: Docker build + push (linux/amd64 GHCR)
+        uses: proops-task-management/cicd-platform/.github/actions/docker-build-push@v4
         with:
           registry: ghcr.io
           image-name: ${{ inputs.project-name }}/${{ inputs.service-name }}
@@ -111,6 +112,6 @@ jobs:
           name: coverage
           path: coverage/
       - name: SonarCloud scan
-        uses: proops-task-management/cicd-platform/.github/actions/sonar-scan@v3
+        uses: proops-task-management/cicd-platform/.github/actions/sonar-scan@v4
         with:
           sonar-token: ${{ secrets.SONAR_TOKEN }}

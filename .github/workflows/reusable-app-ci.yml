@@ -1,9 +1,10 @@
 name: Reusable App CI
 
-# Reusable workflow (v2) — production-grade: parallel jobs gated by an aggregate
+# Reusable workflow (v4) — production-grade: parallel jobs gated by an aggregate
 # `ci-success` job. Service callers require ONLY `app-ci / ci-success` in their
 # ruleset, so the platform can add/remove internal jobs without any service editing
-# its ruleset. Composites referenced by ABSOLUTE @v2 path (./ 404s when called externally).
+# its ruleset. Composites referenced by ABSOLUTE @v4 path (./ 404s when called externally).
+# v4: image built linux/amd64 only (k3s nodes are amd64; dropped arm64-under-QEMU).
 
 on:
   workflow_call:
@@ -41,7 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build app (lint + test + build)
-        uses: proops-task-management/cicd-platform/.github/actions/build-app@v2
+        uses: proops-task-management/cicd-platform/.github/actions/build-app@v4
         with:
           node-version: ${{ inputs.runtime-version }}
           working-directory: ${{ inputs.working-directory }}
@@ -67,7 +68,7 @@ jobs:
           name: coverage
           path: coverage/
       - name: SonarCloud scan
-        uses: proops-task-management/cicd-platform/.github/actions/sonar-scan@v2
+        uses: proops-task-management/cicd-platform/.github/actions/sonar-scan@v4
         with:
           sonar-token: ${{ secrets.SONAR_TOKEN }}
 
@@ -79,8 +80,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
-      - name: Docker build + push (multi-arch GHCR)
-        uses: proops-task-management/cicd-platform/.github/actions/docker-build-push@v2
+      - name: Docker build + push (linux/amd64 GHCR)
+        uses: proops-task-management/cicd-platform/.github/actions/docker-build-push@v4
         with:
           registry: ghcr.io
           image-name: ${{ github.repository }}

@@ -1,8 +1,11 @@
 name: "Docker Build and Push"
-description: "Build a multi-arch docker image and optionally push to a registry (gated by push input)"
+description: "Build a linux/amd64 docker image and optionally push to a registry (gated by push input)"
 
 # Composite action — step-level reuse. Models Day 24's build-image job:
-# QEMU + buildx for multi-arch, login gated by push, two tags (SHA + latest).
+# buildx for linux/amd64 (k3s nodes are amd64 — no QEMU emulation), login gated by
+# push, two tags (SHA + latest). Multi-arch is one `platforms` input away, but the
+# robust path for ARM is NATIVE runners, not QEMU emulation (Day 35 lesson: a moved
+# node:20-alpine tag crashed npm ci under emulated arm64 with signal 4).
 
 inputs:
   registry:
@@ -20,9 +23,9 @@ inputs:
     required: false
     default: "false"
   platforms:
-    description: "Target platforms for multi-arch build"
+    description: "Target platform(s). Default amd64-only"
     required: false
-    default: "linux/amd64,linux/arm64"
+    default: "linux/amd64"
   registry-username:
     description: "Registry username"
     required: false
@@ -33,9 +36,6 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v3
-
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
