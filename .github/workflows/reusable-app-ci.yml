@@ -41,6 +41,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Platform banner (v5)
+        run: echo "▶ cicd-platform reusable-app-ci @v5 — new propagated step (Day 40 S6)"
       - name: Build app (lint + test + build)
         uses: proops-task-management/cicd-platform/.github/actions/build-app@v4
         with:
