@@ -26,6 +26,10 @@ inputs:
     description: "Distinguishes fs vs image results in the Security tab"
     required: false
     default: "trivy"
+  skip-dirs:
+    description: "Comma-separated dirs to exclude. App-CI passes k8s,iac — a PERMANENT scope guard: infra is owned by Kyverno (admission) + the IaC pipeline, never app-CI (IRD-021 'no redundant gate'). Keep it after D16 too — it's a no-op when the dirs are absent and prevents a regression if any reappear."
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -49,6 +53,7 @@ runs:
         scan-ref: ${{ inputs.scan-ref }}
         image-ref: ${{ inputs.scan-ref }}
         scanners: ${{ inputs.scanners }}
+        skip-dirs: ${{ inputs.skip-dirs }}
         format: "sarif"
         output: "trivy-results.sarif"
         severity: ${{ inputs.severity }}
@@ -72,6 +77,7 @@ runs:
         scan-ref: ${{ inputs.scan-ref }}
         image-ref: ${{ inputs.scan-ref }}
         scanners: ${{ inputs.scanners }}
+        skip-dirs: ${{ inputs.skip-dirs }}
         format: "table"
         severity: ${{ inputs.severity }}
         ignore-unfixed: true

@@ -54,6 +54,7 @@ jobs:
           scan-type: fs
           scan-ref: "."
           sarif-category: trivy-fs
+          skip-dirs: k8s,iac          # owned by Kyverno (admission) + IaC pipeline, not app-CI
 
       - name: SonarCloud scan
         if: ${{ inputs.enable-sonar }}
