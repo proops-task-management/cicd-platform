@@ -1,0 +1,43 @@
+# Taskfile.yml — local task runner for cicd-platform (go-task: https://taskfile.dev)
+# Wraps the same gates CI runs, so a contributor can reproduce them locally before pushing.
+# Install go-task: `brew install go-task`. List tasks: `task` or `task --list`.
+# CI remains the enforced gate (IRD-021); this is the fast local mirror (IRD-014 hygiene).
+
+version: "3"
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  hooks:
+    desc: Install the git pre-commit hooks (run once per clone)
+    cmds:
+      - pre-commit install
+
+  lint:
+    desc: Run all pre-commit hooks against every file (gitleaks + yamllint + actionlint)
+    cmds:
+      - pre-commit run --all-files
+
+  actionlint:
+    desc: Validate GitHub Actions workflow syntax + expressions only
+    cmds:
+      - pre-commit run actionlint --all-files
+
+  yamllint:
+    desc: Lint YAML style only (uses .yamllint.yaml)
+    cmds:
+      - pre-commit run yamllint --all-files
+
+  secrets:
+    desc: Scan for committed secrets only (gitleaks)
+    cmds:
+      - pre-commit run gitleaks --all-files
+
+  update-hooks:
+    desc: Bump pinned pre-commit hook versions to latest (review the diff before committing)
+    cmds:
+      - pre-commit autoupdate

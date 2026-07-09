@@ -42,9 +42,11 @@ overlay. **Deploy is not CI's job** — Argo CD pulls from the `deploy` repo (IR
 Tagged `@v6`. Service callers pin to the tag so platform commits cannot silently break them.
 Breaking change → cut `@v7`; each service upgrades deliberately. `@v5` retained for rollback.
 
-## Local checks (pre-commit)
+## Local checks (pre-commit + Taskfile)
 `.pre-commit-config.yaml`: gitleaks + yamllint (`.yamllint.yaml`) + actionlint. Install once:
 `pre-commit install`. Same gitleaks runs in CI as a backstop (IRD-021).
+`Taskfile.yml` (go-task) wraps these locally: `task hooks` (install), `task lint` (run all),
+`task actionlint` / `task yamllint` / `task secrets` (individual). CI stays the enforced gate.
 
 ## Governing docs
 IRD-015 (this contract) · IRD-021 (security gates) · IRD-022 (agent fleet) · IRD-024 (Jenkins
