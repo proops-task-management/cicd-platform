@@ -40,10 +40,7 @@ jobs:
           fetch-depth: 0          # full history so SonarCloud computes "new code" (Day 26)
 
       - name: Scan for committed secrets (gitleaks)
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Free on public repos; no GITLEAKS_LICENSE needed. Pairs with the pre-commit hook.
+        uses: proops-task-management/cicd-platform/.github/actions/gitleaks-scan@v6
 
       - name: Build + test (mvn -B verify)
         uses: proops-task-management/cicd-platform/.github/actions/build-java@v6

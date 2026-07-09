@@ -13,6 +13,7 @@ change cuts the next major tag and callers upgrade deliberately (IRD-015).
 | `docker-build-push` | buildx build → GHCR, `:sha` + `:latest`, push gated by `push` input (linux/amd64 — Day-35) |
 | `sonar-scan` | SonarCloud analysis with blocking quality gate |
 | `trivy-scan` | `fs`\|`image` scan, SARIF → Security tab, gate on fixable HIGH/CRITICAL (IRD-021) |
+| `gitleaks-scan` | secret scan via the gitleaks binary (org-safe, no license); pinned to the pre-commit rev |
 
 ## Reusable workflows (`.github/workflows/`, `on: workflow_call`)
 | Workflow | Purpose |

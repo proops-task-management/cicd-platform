@@ -46,9 +46,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Scan for committed secrets (gitleaks)   # NEW (v6) — IRD-021
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: proops-task-management/cicd-platform/.github/actions/gitleaks-scan@v6
 
       - name: Build app (lint + test + build)
         uses: proops-task-management/cicd-platform/.github/actions/build-app@v6

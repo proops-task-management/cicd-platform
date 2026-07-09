@@ -1,0 +1,27 @@
+name: "Gitleaks Scan"
+description: "Scan the working tree for committed secrets with the gitleaks binary (no license, org-safe)"
+
+# Composite action — runs the gitleaks BINARY directly, not gitleaks/gitleaks-action@v2
+# (that action requires a paid GITLEAKS_LICENSE for ORGANIZATION accounts since 2023).
+# The binary is Apache-2.0 and free for any repo. Version pinned to match the pre-commit
+# hook rev (.pre-commit-config.yaml) so local and CI catch the same things.
+
+inputs:
+  version:
+    description: "gitleaks version (keep in sync with the pre-commit hook rev)"
+    required: false
+    default: "8.18.4"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install + run gitleaks (org-safe, no GITLEAKS_LICENSE)
+      shell: bash
+      run: |
+        set -euo pipefail
+        VER="${{ inputs.version }}"
+        curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz" \
+          | tar -xz gitleaks
+        # --no-git: scan the checked-out tree as-is (robust on shallow PR checkouts);
+        # --redact: never print secret values; --exit-code 1: fail the job on a finding.
+        ./gitleaks detect --source . --no-git --redact --exit-code 1 --no-banner
