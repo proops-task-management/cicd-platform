@@ -1,0 +1,20 @@
+# .pre-commit-config.yaml — cicd-platform @v6
+# Local pre-commit gate (Day 3). Lints workflow/action YAML and blocks committed
+# secrets before they reach CI or history. Install once: `pre-commit install`.
+# Pairs with the in-CI gitleaks + actionlint steps (IRD-021) — same tools, earlier catch.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks               # scan staged changes for credentials (IRD-021)
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        args: ["-c", ".yamllint.yaml"]
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.1
+    hooks:
+      - id: actionlint             # validates .github/workflows/*.yml syntax + expressions

@@ -1,0 +1,79 @@
+name: "Trivy Scan"
+description: "Scan filesystem or image with Trivy; upload SARIF; gate on fixable HIGH/CRITICAL (IRD-021)"
+
+# Composite action — the dependency (fs) + image (image) gate from IRD-021.
+# Two-pass design so we get BOTH outcomes that normally conflict:
+#   pass 1  → SARIF report, exit-code 0 (never fails) → always uploads to Security tab
+#   pass 2  → table to the log, exit-code 1 → FAILS the job on fixable HIGH/CRITICAL
+# Caller job must grant `security-events: write` for the SARIF upload.
+
+inputs:
+  scan-type:
+    description: "fs | image"
+    required: true
+  scan-ref:
+    description: "What to scan: a path (fs, e.g. '.') or an image ref (image, e.g. ghcr.io/...:sha)"
+    required: true
+  severity:
+    description: "Severities that count toward the gate"
+    required: false
+    default: "HIGH,CRITICAL"
+  scanners:
+    description: "fs: 'vuln,misconfig,secret' | image: 'vuln' (misconfig/secret are source-side)"
+    required: false
+    default: "vuln,misconfig,secret"
+  sarif-category:
+    description: "Distinguishes fs vs image results in the Security tab"
+    required: false
+    default: "trivy"
+
+runs:
+  using: "composite"
+  steps:
+    # Cache the Trivy vuln DB so the step stays < 1 min (IRD-021). Keyed by run so
+    # the DB refreshes but is reused across passes/reruns via restore-keys.
+    - name: Cache Trivy DB
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/.trivy-cache
+        key: trivy-db-${{ inputs.scan-type }}-${{ github.run_id }}
+        restore-keys: |
+          trivy-db-${{ inputs.scan-type }}-
+
+    # Pass 1 — produce SARIF, NEVER fail (exit-code 0). Guarantees the Security tab
+    # always gets the results, even when pass 2 is about to block the build.
+    - name: Trivy ${{ inputs.scan-type }} scan → SARIF (report)
+      uses: aquasecurity/trivy-action@0.28.0
+      with:
+        scan-type: ${{ inputs.scan-type }}
+        scan-ref: ${{ inputs.scan-ref }}
+        image-ref: ${{ inputs.scan-ref }}
+        scanners: ${{ inputs.scanners }}
+        format: "sarif"
+        output: "trivy-results.sarif"
+        severity: ${{ inputs.severity }}
+        exit-code: "0"                 # report only — never fails here
+        cache-dir: ${{ github.workspace }}/.trivy-cache
+
+    - name: Upload SARIF to the Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      if: ${{ always() }}             # upload even if a later step fails
+      with:
+        sarif_file: "trivy-results.sarif"
+        category: ${{ inputs.sarif-category }}
+
+    # Pass 2 — the GATE. Same scan, human-readable table, exit-code 1 so a fixable
+    # HIGH/CRITICAL fails the job → the ci-success aggregate goes red → merge blocked.
+    # --ignore-unfixed: don't block on CVEs with no upstream fix yet (IRD-021).
+    - name: Trivy ${{ inputs.scan-type }} scan → gate (fail on fixable HIGH/CRITICAL)
+      uses: aquasecurity/trivy-action@0.28.0
+      with:
+        scan-type: ${{ inputs.scan-type }}
+        scan-ref: ${{ inputs.scan-ref }}
+        image-ref: ${{ inputs.scan-ref }}
+        scanners: ${{ inputs.scanners }}
+        format: "table"
+        severity: ${{ inputs.severity }}
+        ignore-unfixed: true
+        exit-code: "1"                 # ← the gate: fixable HIGH/CRITICAL blocks the build
+        cache-dir: ${{ github.workspace }}/.trivy-cache

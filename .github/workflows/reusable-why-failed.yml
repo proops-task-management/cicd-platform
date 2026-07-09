@@ -1,0 +1,79 @@
+name: Reusable Why-Failed (Agent B relay)
+
+# Reusable workflow (v6) — IRD-022 Agent B. A caller's why-failed.yml triggers on an
+# `issue_comment` containing `/why-failed` and calls this. We re-guard (PR + MEMBER/OWNER),
+# resolve the PR's latest FAILED run id, and POST {repo, pr, run_id} to the fleet's
+# /ci-failed endpoint (org-level vars.FLEET_URL, a stable Route 53 name — ADR-006).
+# Self-skips cleanly until FLEET_URL is set (D21), so the D3 canary is green.
+
+on:
+  workflow_call:
+    inputs:
+      fleet-path:
+        description: "Fleet endpoint path"
+        type: string
+        default: "/ci-failed"
+
+permissions:
+  actions: read           # list workflow runs to find the failed one
+  pull-requests: write    # post the acknowledgement comment (fixes the Day-40 debt)
+
+jobs:
+  relay:
+    # Defense-in-depth guard (the caller already filters the trigger): a /why-failed
+    # comment, on a PR, by a MEMBER or OWNER — never a drive-by external commenter.
+    if: >
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, '/why-failed') &&
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'MEMBER')
+    runs-on: ubuntu-latest
+    steps:
+      - id: guard-fleet
+        name: Is the fleet endpoint configured yet?
+        env:
+          FLEET_URL: ${{ vars.FLEET_URL }}
+        run: |
+          if [ -n "$FLEET_URL" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "vars.FLEET_URL not set — Agent B relay skipped (expected before D21)."
+          fi
+
+      - id: resolve
+        name: Resolve the PR's latest failed run id
+        if: ${{ steps.guard-fleet.outputs.enabled == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          HEAD_SHA=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json headRefOid -q .headRefOid)
+          RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$HEAD_SHA" \
+                     --status failure --limit 1 --json databaseId -q '.[0].databaseId // ""')
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          [ -n "$RUN_ID" ] && echo "Found failed run $RUN_ID" || echo "No failed run found for PR #$PR."
+
+      - name: POST to fleet ${{ inputs.fleet-path }}
+        if: ${{ steps.guard-fleet.outputs.enabled == 'true' && steps.resolve.outputs.run_id != '' }}
+        env:
+          FLEET_URL: ${{ vars.FLEET_URL }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+          RUN_ID: ${{ steps.resolve.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          curl -sSf -X POST "${FLEET_URL}${{ inputs.fleet-path }}" \
+            -H 'Content-Type: application/json' \
+            -d "$(jq -nc --arg repo "$REPO" --argjson pr "$PR" --argjson run_id "$RUN_ID" \
+                    '{repo:$repo, pr:$pr, run_id:$run_id}')"
+
+      - name: Acknowledge on the PR
+        if: ${{ steps.guard-fleet.outputs.enabled == 'true' && steps.resolve.outputs.run_id != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment ${{ github.event.issue.number }} --repo "$GITHUB_REPOSITORY" \
+            --body "🤖 Agent B is triaging failed run ${{ steps.resolve.outputs.run_id }} — analysis will follow."

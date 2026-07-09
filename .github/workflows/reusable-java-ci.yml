@@ -1,0 +1,81 @@
+name: Reusable Java CI
+
+# Reusable workflow (v6) — the backend PR gate. The Java twin of reusable-app-ci.
+# One `ci` job runs the full gate (build+test, gitleaks, trivy fs, sonar); a `ci-success`
+# aggregate is the ONLY required status check in every service ruleset. Naming the caller
+# job `app-ci` makes the check resolve to `app-ci / ci-success` — identical name across
+# Node and Java repos, so one ruleset line covers all 5 services (IRD-015).
+
+on:
+  workflow_call:
+    inputs:
+      service-name:
+        description: "Service repo/image name, e.g. task-service"
+        type: string
+        required: true
+      java-version:
+        type: string
+        default: "21"
+      run-integration-tests:
+        description: "Run Testcontainers *IT (mvn verify) vs unit-only (mvn test)"
+        type: boolean
+        default: true
+      enable-sonar:
+        description: "Run the SonarCloud quality gate (needs SONAR_TOKEN)"
+        type: boolean
+        default: true
+    secrets:
+      SONAR_TOKEN:
+        required: false
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write      # trivy SARIF upload → Security tab
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # full history so SonarCloud computes "new code" (Day 26)
+
+      - name: Scan for committed secrets (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Free on public repos; no GITLEAKS_LICENSE needed. Pairs with the pre-commit hook.
+
+      - name: Build + test (mvn -B verify)
+        uses: proops-task-management/cicd-platform/.github/actions/build-java@v6
+        with:
+          java-version: ${{ inputs.java-version }}
+          run-integration-tests: ${{ inputs.run-integration-tests }}
+
+      - name: Trivy filesystem scan (dependencies + secrets + misconfig)
+        uses: proops-task-management/cicd-platform/.github/actions/trivy-scan@v6
+        with:
+          scan-type: fs
+          scan-ref: "."
+          sarif-category: trivy-fs
+
+      - name: SonarCloud scan
+        if: ${{ inputs.enable-sonar }}
+        uses: proops-task-management/cicd-platform/.github/actions/sonar-scan@v6
+        with:
+          sonar-token: ${{ secrets.SONAR_TOKEN }}
+
+  # Aggregate gate — the ONLY required check in the service ruleset. Add/remove steps
+  # or jobs without ever editing a ruleset. `if: always()` so a skipped/failed upstream
+  # is evaluated explicitly rather than silently passing.
+  ci-success:
+    needs: [ci]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail unless the ci job succeeded
+        if: ${{ needs.ci.result != 'success' }}
+        run: |
+          echo "ci=${{ needs.ci.result }} — a required job did not succeed."
+          exit 1
+      - name: Gate passed
+        run: echo "ci=${{ needs.ci.result }} — OK"

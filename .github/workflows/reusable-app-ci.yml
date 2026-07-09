@@ -1,10 +1,10 @@
 name: Reusable App CI
 
-# Reusable workflow (v4) — production-grade: parallel jobs gated by an aggregate
-# `ci-success` job. Service callers require ONLY `app-ci / ci-success` in their
-# ruleset, so the platform can add/remove internal jobs without any service editing
-# its ruleset. Composites referenced by ABSOLUTE @v4 path (./ 404s when called externally).
-# v4: image built linux/amd64 only (k3s nodes are amd64; dropped arm64-under-QEMU).
+# Reusable workflow (v6) — Node PR gate. Parallel jobs gated by an aggregate
+# `ci-success` job; service callers require ONLY `app-ci / ci-success`. v6 adds the
+# gitleaks + trivy-fs security gates (IRD-021) to match reusable-java-ci, and bumps
+# internal composite refs @v4 → @v6 so the whole tag is self-consistent.
+# Composites referenced by ABSOLUTE @v6 path (./ 404s when called externally).
 
 on:
   workflow_call:
@@ -39,15 +39,30 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write          # NEW (v6): trivy SARIF upload → Security tab
     steps:
       - uses: actions/checkout@v4
-      - name: Platform banner (v5)
-        run: echo "▶ cicd-platform reusable-app-ci @v5 — new propagated step (Day 40 S6)"
+
+      - name: Scan for committed secrets (gitleaks)   # NEW (v6) — IRD-021
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build app (lint + test + build)
-        uses: proops-task-management/cicd-platform/.github/actions/build-app@v4
+        uses: proops-task-management/cicd-platform/.github/actions/build-app@v6
         with:
           node-version: ${{ inputs.runtime-version }}
           working-directory: ${{ inputs.working-directory }}
+
+      - name: Trivy filesystem scan (deps + secrets + misconfig)   # NEW (v6) — IRD-021
+        uses: proops-task-management/cicd-platform/.github/actions/trivy-scan@v6
+        with:
+          scan-type: fs
+          scan-ref: ${{ inputs.working-directory }}
+          sarif-category: trivy-fs
+
       - name: Upload coverage
         uses: actions/upload-artifact@v4
         with:
@@ -70,7 +85,7 @@ jobs:
           name: coverage
           path: coverage/
       - name: SonarCloud scan
-        uses: proops-task-management/cicd-platform/.github/actions/sonar-scan@v4
+        uses: proops-task-management/cicd-platform/.github/actions/sonar-scan@v6
         with:
           sonar-token: ${{ secrets.SONAR_TOKEN }}
 
@@ -83,7 +98,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Docker build + push (linux/amd64 GHCR)
-        uses: proops-task-management/cicd-platform/.github/actions/docker-build-push@v4
+        uses: proops-task-management/cicd-platform/.github/actions/docker-build-push@v6
         with:
           registry: ghcr.io
           image-name: ${{ github.repository }}

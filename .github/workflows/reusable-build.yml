@@ -1,43 +1,58 @@
 name: Reusable Build
 
-# Reusable workflow (v4) — the "build once" half of the Day 29 promotion model.
-# Runs lint + test + build, then builds a linux/amd64 image tagged by the commit
-# SHA and pushes it to GHCR ONE time (amd64-only: k3s nodes are amd64; Day 35
-# dropped the fragile arm64-under-QEMU leg). The SHA is surfaced to the caller via
-# the workflow-level `outputs.image-tag` so every environment can promote the SAME
-# bytes. Composites are referenced by ABSOLUTE @v4 path (./ 404s when called
-# externally), consistent with reusable-app-ci.yml.
+# Reusable workflow (v6) — the "build once" half. Runs the stack's test+build, builds a
+# linux/amd64 image tagged by the commit SHA (Day-35: amd64-only in CI), pushes :sha + :latest
+# to GHCR ONCE, trivy-image-gates it, then hands off to GitOps by bumping the deploy repo's
+# dev overlay (bump-dev). The SHA is surfaced via workflow output so every env promotes the
+# SAME bytes. Composites referenced by ABSOLUTE @v6 path (./ 404s when called externally).
+#
+# NOTE (v6): the v5 optional main-branch SonarCloud "refresh" job was dropped. The PR gate
+# (reusable-*-ci) runs the BLOCKING Sonar scan; the ruleset guarantees main only advances via
+# a green PR, so a non-blocking main-branch refresh added no enforcement. SonarCloud "new code"
+# baseline is handled by setting New Code = reference branch `main` at Sonar project onboarding
+# (D4/D6) — see TODO on MIN-8. IRD-015 build contract = build + bump-dev only.
 
 on:
   workflow_call:
     inputs:
-      runtime-version:
-        description: "Node.js version"
-        type: string
-        default: "20"
-      working-directory:
-        type: string
-        default: "."
       project-name:
         description: "GHCR namespace / image owner (e.g. proops-task-management)"
         type: string
         required: true
       service-name:
-        description: "Image name under the project (e.g. frontend-service)"
+        description: "Image name + deploy overlay key (e.g. task-service)"
         type: string
         required: true
-      enable-sonar:
-        description: "Run the SonarCloud quality gate on the main branch (needs SONAR_TOKEN)"
+      stack:
+        description: "node | java — selects build-app or build-java"
+        type: string
+        required: true
+      runtime-version:
+        description: "Node.js version (stack=node)"
+        type: string
+        default: "20"
+      java-version:
+        description: "Temurin version (stack=java)"
+        type: string
+        default: "21"
+      working-directory:
+        type: string
+        default: "."
+      run-integration-tests:
+        description: "stack=java: run Testcontainers *IT (mvn verify)"
+        type: boolean
+        default: true
+      push-ecr-mirror:
+        description: "Also mirror the image to ECR — EKS window only (IRD-023). Wired in Phase 9."
         type: boolean
         default: false
     outputs:
       image-tag:
         description: "The commit SHA used as the image tag — promote this everywhere"
-        # Workflow-level output: the ONLY way a value leaves a reusable workflow.
-        # It points at the job-level output, which points at the step output.
         value: ${{ jobs.build.outputs.image-tag }}
     secrets:
-      SONAR_TOKEN:
+      DEPLOY_REPO_TOKEN:
+        description: "Fine-grained token / App creds, scope = deploy repo contents:write ONLY. Absent before D12 → bump-dev self-skips."
         required: false
 
 jobs:
@@ -46,33 +61,33 @@ jobs:
     permissions:
       contents: read
       packages: write
-    # Job-level output: relays the step output up so the workflow output can read it.
+      security-events: write          # trivy image SARIF upload
     outputs:
       image-tag: ${{ steps.set-tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build app (lint + test + build)
-        uses: proops-task-management/cicd-platform/.github/actions/build-app@v4
+      - name: Build + test (Node)
+        if: ${{ inputs.stack == 'node' }}
+        uses: proops-task-management/cicd-platform/.github/actions/build-app@v6
         with:
           node-version: ${{ inputs.runtime-version }}
           working-directory: ${{ inputs.working-directory }}
 
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
+      - name: Build + test (Java)
+        if: ${{ inputs.stack == 'java' }}
+        uses: proops-task-management/cicd-platform/.github/actions/build-java@v6
         with:
-          name: coverage
-          path: ${{ inputs.working-directory }}/coverage/
-          if-no-files-found: ignore
+          java-version: ${{ inputs.java-version }}
+          working-directory: ${{ inputs.working-directory }}
+          run-integration-tests: ${{ inputs.run-integration-tests }}
 
       - id: set-tag
         name: Compute image tag from commit SHA
-        # Step output: the single place the SHA is computed. Everything else
-        # references steps.set-tag.outputs.tag so there is one source of truth.
         run: echo "tag=${{ github.sha }}" >> "$GITHUB_OUTPUT"
 
-      - name: Docker build + push (linux/amd64 GHCR)
-        uses: proops-task-management/cicd-platform/.github/actions/docker-build-push@v4
+      - name: Docker build + push (:sha + :latest, linux/amd64 GHCR)
+        uses: proops-task-management/cicd-platform/.github/actions/docker-build-push@v6
         with:
           registry: ghcr.io
           image-name: ${{ inputs.project-name }}/${{ inputs.service-name }}
@@ -81,37 +96,81 @@ jobs:
           registry-username: ${{ github.actor }}
           registry-password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Trivy image scan (gate before the SHA is trusted for deploy)
+        # Image is in GHCR now, but nothing DEPLOYS it until bump-dev (needs: build).
+        # A failed gate fails build → bump-dev never runs → the vulnerable SHA is never
+        # referenced by any env. "Trust" = referenced by deploy, not mere existence.
+        uses: proops-task-management/cicd-platform/.github/actions/trivy-scan@v6
+        with:
+          scan-type: image
+          scan-ref: ghcr.io/${{ inputs.project-name }}/${{ inputs.service-name }}:${{ steps.set-tag.outputs.tag }}
+          scanners: vuln
+          sarif-category: trivy-image
+
       - name: Record SHA in run summary
         run: |
           {
             echo "### Build complete — promote this SHA"
-            echo "Image tag: \`${{ steps.set-tag.outputs.tag }}\`"
             echo "Image: \`ghcr.io/${{ inputs.project-name }}/${{ inputs.service-name }}:${{ steps.set-tag.outputs.tag }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # Optional main-branch SonarCloud analysis (parallel to the image push, gated by
-  # enable-sonar). Keeps the SonarCloud "new code" baseline fresh after each merge.
-  # deploy jobs that `needs: build` (the caller's reusable-build call) wait for this
-  # too, so a failed main-branch gate blocks the dev deploy.
-  sonar:
+  # GitOps handoff — CI's last act. Bumps the deploy repo dev overlay to the new SHA.
+  # Self-skips cleanly until the deploy repo + DEPLOY_REPO_TOKEN exist (D12), so the
+  # D3 canary is green. Idempotent: commits only if the SHA actually changed.
+  bump-dev:
     needs: build
-    if: ${{ inputs.enable-sonar }}
-    # Non-blocking: main-branch analysis refreshes the baseline + catches bypass
-    # pushes, but a gate failure here does NOT fail the reusable-build call, so the
-    # caller's deploy-dev (needs: build) still proceeds. Industry norm: PR blocks,
-    # main monitors. The PR gate (reusable-app-ci on pr-opened) is the blocking one.
-    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - id: guard
+        name: Is the GitOps handoff configured yet?
+        env:
+          TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "DEPLOY_REPO_TOKEN not set — GitOps bump skipped (expected before D12)."
+          fi
+
+      - name: Checkout deploy repo
+        if: ${{ steps.guard.outputs.enabled == 'true' }}
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # full history so SonarCloud computes "new code" (Day 26 lesson)
-      - name: Download coverage
-        uses: actions/download-artifact@v4
-        with:
-          name: coverage
-          path: coverage/
-      - name: SonarCloud scan
-        uses: proops-task-management/cicd-platform/.github/actions/sonar-scan@v4
-        with:
-          sonar-token: ${{ secrets.SONAR_TOKEN }}
+          repository: ${{ inputs.project-name }}/deploy
+          token: ${{ secrets.DEPLOY_REPO_TOKEN }}
+          path: deploy
+
+      - name: Install kustomize
+        if: ${{ steps.guard.outputs.enabled == 'true' }}
+        run: |
+          curl -sSfL "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" \
+            | bash -s 5.4.3
+          sudo mv kustomize /usr/local/bin/
+
+      - name: Bump dev overlay to the new SHA (idempotent, retry once on race)
+        if: ${{ steps.guard.outputs.enabled == 'true' }}
+        working-directory: deploy/apps/${{ inputs.service-name }}/overlays/dev
+        env:
+          IMG: ghcr.io/${{ inputs.project-name }}/${{ inputs.service-name }}
+          SHA: ${{ needs.build.outputs.image-tag }}
+        run: |
+          set -euo pipefail
+          git config user.name  "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+          kustomize edit set image "${{ inputs.service-name }}=${IMG}:${SHA}"
+          if git -C "$GITHUB_WORKSPACE/deploy" diff --quiet; then
+            echo "dev overlay already at ${SHA} — nothing to commit (idempotent)."
+            exit 0
+          fi
+          git -C "$GITHUB_WORKSPACE/deploy" add -A
+          git -C "$GITHUB_WORKSPACE/deploy" commit -m "ci(${{ inputs.service-name }}): dev → ${SHA}"
+          # Retry once: a concurrent service build may have pushed between our fetch and push.
+          for attempt in 1 2; do
+            if git -C "$GITHUB_WORKSPACE/deploy" push; then
+              echo "pushed on attempt ${attempt}"; exit 0
+            fi
+            echo "push rejected (non-fast-forward) — rebasing and retrying"
+            git -C "$GITHUB_WORKSPACE/deploy" pull --rebase
+          done
+          echo "bump-dev failed after retry"; exit 1

@@ -1,0 +1,25 @@
+# .yamllint.yaml — config for the yamllint pre-commit hook (cicd-platform @v6)
+# Relaxes two rules that conflict with GitHub Actions YAML; keeps the rest strict.
+extends: default
+
+rules:
+  # Actions expressions (${{ ... }}) routinely exceed 80 chars and cannot wrap.
+  # Warn past 120 so genuinely runaway lines still surface, but never error.
+  line-length:
+    max: 120
+    level: warning
+
+  # GitHub workflows use the literal `on:` trigger key. YAML 1.1 sees on/yes/no
+  # as booleans; allow them so `on:` isn't flagged. Still catches real typos.
+  truthy:
+    allowed-values: ["true", "false", "on", "off"]
+    check-keys: true
+
+  # Actions files nest deeply (jobs > job > steps > step); 2-space, allow the
+  # slightly irregular indentation buildx/compose blocks sometimes need.
+  indentation:
+    spaces: 2
+    indent-sequences: consistent
+
+  comments:
+    min-spaces-from-content: 1   # `run: cmd  # note` is fine; default demands 2

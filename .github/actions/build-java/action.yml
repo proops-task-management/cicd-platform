@@ -1,0 +1,45 @@
+name: "Build Java"
+description: "Set up Temurin JDK, cache Maven, and run `mvn -B verify` (unit + Testcontainers *IT)"
+
+# Composite action — step-level reuse. Runs INSIDE the caller's job/runner, so the
+# Docker daemon on the ubuntu-latest runner is available for Testcontainers (*IT).
+# Java twin of build-app (Node). Every `run:` step must declare `shell:` explicitly
+# (composites do not inherit a default shell).
+
+inputs:
+  java-version:
+    description: "Temurin JDK version"
+    required: false
+    default: "21"
+  working-directory:
+    description: "Directory containing pom.xml"
+    required: false
+    default: "."
+  run-integration-tests:
+    description: "Run Testcontainers *IT tests (mvn verify). false → mvn test only (unit)."
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up JDK ${{ inputs.java-version }} (Temurin)
+      uses: actions/setup-java@v4
+      with:
+        distribution: "temurin"
+        java-version: ${{ inputs.java-version }}
+        cache: "maven"                 # caches ~/.m2 keyed on pom.xml hashes — no manual cache step
+
+    - name: Build + test (mvn -B verify)
+      if: ${{ inputs.run-integration-tests == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      # -B batch mode (no ANSI/interactive); verify = compile + unit + *IT Testcontainers +
+      # package. Testcontainers uses the runner's Docker daemon (present on ubuntu-latest).
+      run: mvn -B verify
+
+    - name: Build + unit test only (mvn -B test)
+      if: ${{ inputs.run-integration-tests != 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: mvn -B test

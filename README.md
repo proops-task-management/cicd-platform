@@ -2,20 +2,49 @@
 
 Centralized CI/CD platform for the **proops-task-management** org — composite actions
 (step-level reuse) and reusable workflows (job-level reuse). Service repos consume these
-as **thin callers** pinned to a tag (`@v1`), never `@main`.
+as **thin callers** pinned to a tag (`@v6`), never `@main`. All logic lives here; a breaking
+change cuts the next major tag and callers upgrade deliberately (IRD-015).
 
 ## Composite actions (`.github/actions/`)
 | Action | Purpose |
 |---|---|
-| `build-app` | setup-node + npm ci + lint + test + build (Node toolchain) |
-| `docker-build-push` | qemu + buildx + login + multi-arch build, push gated by `push` input |
+| `build-app` | Node: setup-node + npm ci + lint + test + build |
+| `build-java` | Java: setup-java (Temurin) + Maven cache + `mvn -B verify` (unit + Testcontainers `*IT`) |
+| `docker-build-push` | buildx build → GHCR, `:sha` + `:latest`, push gated by `push` input (linux/amd64 — Day-35) |
+| `sonar-scan` | SonarCloud analysis with blocking quality gate |
+| `trivy-scan` | `fs`\|`image` scan, SARIF → Security tab, gate on fixable HIGH/CRITICAL (IRD-021) |
 
 ## Reusable workflows (`.github/workflows/`, `on: workflow_call`)
 | Workflow | Purpose |
 |---|---|
-| `reusable-app-ci.yml` | build/test via `build-app` then `docker-build-push` (push if input true) |
-| `reusable-iac.yml` | terraform init/validate/plan, apply/destroy gated by `action` input |
+| `reusable-app-ci.yml` | Node PR gate → `app-ci / ci-success` (build + sonar + image + gitleaks + trivy fs) |
+| `reusable-java-ci.yml` | Java PR gate → `app-ci / ci-success` (mvn verify + sonar + gitleaks + trivy fs) |
+| `reusable-build.yml` | merge-time build-once (`stack: node\|java`) → GHCR `:sha` + trivy image + GitOps `bump-dev` |
+| `reusable-iac.yml` | terraform fmt/validate/plan, apply/destroy gated by `action` input (platform-iac) |
+| `reusable-why-failed.yml` | Agent B relay: `/why-failed` PR comment → POST fleet `/ci-failed` (IRD-022) |
+
+## The @v6 delivery contract (CI-agnostic)
+`@v6` is a **contract**, not "the GitHub Actions pipeline" (ADR-010). Every engine produces the
+same 4 outputs: (1) build-once **linux/amd64** image tagged by full SHA (amd64-only in CI —
+Day-35 / ADR-011), (2) push to `ghcr.io/proops-task-management/<svc>:<sha>` (public), (3) gates
+pass (tests, Sonar, Trivy, gitleaks), (4) idempotent `bump-dev` commit to the `deploy` repo dev
+overlay. **Deploy is not CI's job** — Argo CD pulls from the `deploy` repo (IRD-017).
+`reusable-deploy.yml` (push-deploy) was **retired at v6**.
+
+## Thin-caller templates (per service repo)
+- Java (`api-gateway`, `user-service`, `task-service`, `notification-service`):
+  `pr-opened.yml` → `reusable-java-ci.yml@v6` · `pr-merged.yml` → `reusable-build.yml@v6` (`stack: java`) ·
+  `why-failed.yml` → `reusable-why-failed.yml@v6`
+- Node (`frontend-service`): same trio with `reusable-app-ci.yml@v6` / `stack: node`.
 
 ## Versioning
-Tagged `@v1`. Service callers pin to the tag so platform commits cannot silently break them.
-Breaking change → cut `@v2`; each service upgrades deliberately.
+Tagged `@v6`. Service callers pin to the tag so platform commits cannot silently break them.
+Breaking change → cut `@v7`; each service upgrades deliberately. `@v5` retained for rollback.
+
+## Local checks (pre-commit)
+`.pre-commit-config.yaml`: gitleaks + yamllint (`.yamllint.yaml`) + actionlint. Install once:
+`pre-commit install`. Same gitleaks runs in CI as a backstop (IRD-021).
+
+## Governing docs
+IRD-015 (this contract) · IRD-021 (security gates) · IRD-022 (agent fleet) · IRD-024 (Jenkins
+second engine) · ADR-010 (dual-CI decision).
