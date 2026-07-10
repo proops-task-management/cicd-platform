@@ -96,16 +96,18 @@ jobs:
           registry-username: ${{ github.actor }}
           registry-password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Trivy image scan (gate before the SHA is trusted for deploy)
-        # Image is in GHCR now, but nothing DEPLOYS it until bump-dev (needs: build).
-        # A failed gate fails build → bump-dev never runs → the vulnerable SHA is never
-        # referenced by any env. "Trust" = referenced by deploy, not mere existence.
+      - name: Trivy image scan (report — advisory, non-blocking)
+        # Warn policy (ADR-012): image/base-layer CVEs are third-party — detected + reported
+        # (SARIF + job summary), NOT gated. The first-party image stop moves to admission:
+        # Kyverno rejects :latest / privileged / no-limits at deploy time (IRD-021 gate #7).
+        # So a CVE-bearing SHA can build + bump-dev, but only a policy-compliant manifest deploys.
         uses: proops-task-management/cicd-platform/.github/actions/trivy-scan@v6
         with:
           scan-type: image
           scan-ref: ghcr.io/${{ inputs.project-name }}/${{ inputs.service-name }}:${{ steps.set-tag.outputs.tag }}
           scanners: vuln
           sarif-category: trivy-image
+          policy: warn                # report, don't block (was an implicit Block gate)
 
       - name: Record SHA in run summary
         run: |

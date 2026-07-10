@@ -1,15 +1,18 @@
 name: "Trivy Scan"
-description: "Scan filesystem or image with Trivy; upload SARIF; gate on fixable HIGH/CRITICAL (IRD-021)"
+description: "Scan filesystem/image/config with Trivy; upload SARIF + job summary; policy-driven gate (Block|Warn) per IRD-021 / ADR-012"
 
-# Composite action — the dependency (fs) + image (image) gate from IRD-021.
-# Two-pass design so we get BOTH outcomes that normally conflict:
-#   pass 1  → SARIF report, exit-code 0 (never fails) → always uploads to Security tab
-#   pass 2  → table to the log, exit-code 1 → FAILS the job on fixable HIGH/CRITICAL
+# Composite action — the Trivy gate from IRD-021, policy-driven (ADR-012).
+# The `policy` input decides whether pass 2 blocks:
+#   block → ignore-unfixed, exit-code 1 → FAILS on fixable HIGH/CRITICAL (first-party: config/IaC)
+#   warn  → show everything (incl. unfixed), exit-code 0 → reports, never fails (third-party CVEs: fs/image)
+# Two-pass design so we ALWAYS get both outcomes that normally conflict:
+#   pass 1 → SARIF report, exit-code 0 (never fails) → always uploads to the Security tab
+#   pass 2 → human-readable table to the log + job summary; blocks only when policy=block
 # Caller job must grant `security-events: write` for the SARIF upload.
 
 inputs:
   scan-type:
-    description: "fs | image"
+    description: "fs | image | config"
     required: true
   scan-ref:
     description: "What to scan: a path (fs, e.g. '.') or an image ref (image, e.g. ghcr.io/...:sha)"
@@ -30,6 +33,13 @@ inputs:
     description: "Comma-separated dirs to exclude. App-CI passes k8s,iac — a PERMANENT scope guard: infra is owned by Kyverno (admission) + the IaC pipeline, never app-CI (IRD-021 'no redundant gate'). Keep it after D16 too — it's a no-op when the dirs are absent and prevents a regression if any reappear."
     required: false
     default: ""
+  policy:
+    description: >
+      block = fail the job on fixable HIGH/CRITICAL (first-party gates, e.g. `config` on IaC).
+      warn  = report only, never fail, and surface fixed AND unfixed (third-party CVE gates:
+      `fs`/`image`). Per the IRD-021 gate-policy matrix / ADR-012.
+    required: false
+    default: "block"
 
 runs:
   using: "composite"
@@ -67,10 +77,11 @@ runs:
         sarif_file: "trivy-results.sarif"
         category: ${{ inputs.sarif-category }}
 
-    # Pass 2 — the GATE. Same scan, human-readable table, exit-code 1 so a fixable
-    # HIGH/CRITICAL fails the job → the ci-success aggregate goes red → merge blocked.
-    # --ignore-unfixed: don't block on CVEs with no upstream fix yet (IRD-021).
-    - name: Trivy ${{ inputs.scan-type }} scan → gate (fail on fixable HIGH/CRITICAL)
+    # Pass 2 — table to the log + a file for the job summary. Policy decides whether it GATES:
+    #   block → ignore-unfixed, exit-code 1 (fixable HIGH/CRITICAL fails → ci-success red → merge blocked)
+    #   warn  → show everything (incl. unfixed), exit-code 0 (never fails) — DevSecOps detects+reports;
+    #           remediation is the app team's backlog (ADR-012).
+    - name: Trivy ${{ inputs.scan-type }} scan → ${{ inputs.policy == 'warn' && 'report (Warn, non-blocking)' || 'gate (Block on fixable HIGH/CRITICAL)' }}
       uses: aquasecurity/trivy-action@v0.36.0
       with:
         scan-type: ${{ inputs.scan-type }}
@@ -79,7 +90,22 @@ runs:
         scanners: ${{ inputs.scanners }}
         skip-dirs: ${{ inputs.skip-dirs }}
         format: "table"
+        output: "trivy-${{ inputs.scan-type }}-table.txt"
         severity: ${{ inputs.severity }}
-        ignore-unfixed: true
-        exit-code: "1"                 # ← the gate: fixable HIGH/CRITICAL blocks the build
+        ignore-unfixed: ${{ inputs.policy == 'block' }}
+        exit-code: ${{ inputs.policy == 'warn' && '0' || '1' }}
         cache-dir: ${{ github.workspace }}/.trivy-cache
+
+    # Always surface the findings — to the log AND the job summary — even when pass 2
+    # blocked (block policy), so the developer sees exactly what failed / was reported.
+    - name: Publish Trivy findings (log + job summary)
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        echo "## Trivy ${{ inputs.scan-type }} — policy: ${{ inputs.policy }}" >> "$GITHUB_STEP_SUMMARY"
+        if [ -s "trivy-${{ inputs.scan-type }}-table.txt" ]; then
+          { echo '```'; cat "trivy-${{ inputs.scan-type }}-table.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          cat "trivy-${{ inputs.scan-type }}-table.txt"
+        else
+          echo "_No HIGH/CRITICAL findings._" >> "$GITHUB_STEP_SUMMARY"
+        fi

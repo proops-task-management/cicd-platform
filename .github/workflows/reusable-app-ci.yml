@@ -61,6 +61,7 @@ jobs:
           scan-ref: ${{ inputs.working-directory }}
           sarif-category: trivy-fs
           skip-dirs: k8s,iac          # owned by Kyverno (admission) + IaC pipeline, not app-CI
+          policy: warn                # third-party CVEs: report, don't block (ADR-012)
 
       - name: Upload coverage
         uses: actions/upload-artifact@v4
