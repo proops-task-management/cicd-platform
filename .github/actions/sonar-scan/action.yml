@@ -13,6 +13,15 @@ inputs:
     description: "Sonar host URL"
     required: false
     default: "https://sonarcloud.io"
+  qualitygate-wait:
+    description: >
+      "true"  = wait for the quality gate and FAIL the job if it fails — the BLOCKING
+                PR gate (reusable-*-ci): sonar job fails → ci-success fails → merge blocked.
+      "false" = fire-and-forget — the NON-BLOCKING main-branch baseline refresh
+                (reusable-build, post-merge): updates the main dashboard + the New Code
+                reference baseline, but a gate result never fails the build.
+    required: false
+    default: "true"
 
 runs:
   using: "composite"
@@ -20,11 +29,8 @@ runs:
     - name: SonarCloud Scan
       uses: SonarSource/sonarqube-scan-action@v4
       with:
-        # Wait for the quality gate and FAIL this job if it fails. This moves
-        # enforcement from "ruleset requires SonarCloud's external status" to
-        # "the sonar job fails → the ci-success aggregate fails → merge blocked".
         args: >
-          -Dsonar.qualitygate.wait=true
+          -Dsonar.qualitygate.wait=${{ inputs.qualitygate-wait }}
       env:
         SONAR_TOKEN: ${{ inputs.sonar-token }}
         SONAR_HOST_URL: ${{ inputs.sonar-host-url }}

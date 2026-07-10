@@ -6,11 +6,13 @@ name: Reusable Build
 # dev overlay (bump-dev). The SHA is surfaced via workflow output so every env promotes the
 # SAME bytes. Composites referenced by ABSOLUTE @v6 path (./ 404s when called externally).
 #
-# NOTE (v6): the v5 optional main-branch SonarCloud "refresh" job was dropped. The PR gate
-# (reusable-*-ci) runs the BLOCKING Sonar scan; the ruleset guarantees main only advances via
-# a green PR, so a non-blocking main-branch refresh added no enforcement. SonarCloud "new code"
-# baseline is handled by setting New Code = reference branch `main` at Sonar project onboarding
-# (D4/D6) — see TODO on MIN-8. IRD-015 build contract = build + bump-dev only.
+# NOTE (v6.1): the main-branch SonarCloud analysis is RESTORED here as a NON-BLOCKING refresh.
+# v6 dropped it on the grounds it "added no enforcement" — true, but enforcement was never its
+# job: its value is the persistent `main` dashboard + the New Code = reference-branch baseline
+# that every PR analysis diffs against. Without a main analysis, "reference branch main" has
+# nothing to reference (MIN-8 TODO) and the main dashboard stays empty forever. So the split is:
+# PR gate BLOCKS (reusable-*-ci, qualitygate-wait=true); this main refresh only RECORDS
+# (qualitygate-wait=false, continue-on-error). IRD-015 build contract = build + sonar-refresh + bump-dev.
 
 on:
   workflow_call:
@@ -46,6 +48,10 @@ on:
         description: "Also mirror the image to ECR — EKS window only (IRD-023). Wired in Phase 9."
         type: boolean
         default: false
+      enable-sonar:
+        description: "Run the NON-BLOCKING SonarCloud main-branch baseline refresh (needs SONAR_TOKEN). Set false for repos not onboarded to Sonar (e.g. token-less)."
+        type: boolean
+        default: true
     outputs:
       image-tag:
         description: "The commit SHA used as the image tag — promote this everywhere"
@@ -53,6 +59,9 @@ on:
     secrets:
       DEPLOY_REPO_TOKEN:
         description: "Fine-grained token / App creds, scope = deploy repo contents:write ONLY. Absent before D12 → bump-dev self-skips."
+        required: false
+      SONAR_TOKEN:
+        description: "SonarCloud token for the main-branch baseline refresh. Absent → the refresh step no-ops (continue-on-error swallows the auth failure)."
         required: false
 
 jobs:
@@ -66,6 +75,8 @@ jobs:
       image-tag: ${{ steps.set-tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # full history so SonarCloud computes "new code" on main (Day 26)
 
       - name: Build + test (Node)
         if: ${{ inputs.stack == 'node' }}
@@ -81,6 +92,18 @@ jobs:
           java-version: ${{ inputs.java-version }}
           working-directory: ${{ inputs.working-directory }}
           run-integration-tests: ${{ inputs.run-integration-tests }}
+
+      # Restored at v6.1 — the main-branch analysis (see header NOTE). Runs right after build
+      # so target/ (java binaries) + coverage/ are fresh. NOT a gate: post-merge on main, so
+      # qualitygate-wait=false (records, never fails) and continue-on-error=true so a Sonar or
+      # token outage never blocks the image push / GitOps bump-dev.
+      - name: SonarCloud main-branch analysis (baseline refresh — non-blocking)
+        if: ${{ inputs.enable-sonar }}
+        continue-on-error: true
+        uses: proops-task-management/cicd-platform/.github/actions/sonar-scan@v6
+        with:
+          sonar-token: ${{ secrets.SONAR_TOKEN }}
+          qualitygate-wait: "false"
 
       - id: set-tag
         name: Compute image tag from commit SHA
