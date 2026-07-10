@@ -1,6 +1,6 @@
 name: Reusable Java CI
 
-# Reusable workflow (v6) — the backend PR gate. The Java twin of reusable-app-ci.
+# Reusable workflow (v6) — the backend PR gate. The Java twin of reusable-node-ci.
 # One `ci` job runs the full gate (build+test, gitleaks, trivy fs, sonar); a `ci-success`
 # aggregate is the ONLY required status check in every service ruleset. Naming the caller
 # job `app-ci` makes the check resolve to `app-ci / ci-success` — identical name across
@@ -57,8 +57,12 @@ jobs:
           skip-dirs: k8s,iac          # owned by Kyverno (admission) + IaC pipeline, not app-CI
           policy: warn                # third-party CVEs: report, don't block (ADR-012)
 
+      # Skip Sonar on Dependabot PRs: GitHub withholds Actions secrets from Dependabot runs
+      # (`Secret source: Dependabot` → empty SONAR_TOKEN → auth fail), AND a dep bump has zero
+      # new first-party code for Sonar to gate. build+test still runs (the real gate for a bump);
+      # Trivy still reports the dependency CVEs. Net: no security loss. (ADR-012 gate-purpose rule.)
       - name: SonarCloud scan
-        if: ${{ inputs.enable-sonar }}
+        if: ${{ inputs.enable-sonar && github.actor != 'dependabot[bot]' }}
         uses: proops-task-management/cicd-platform/.github/actions/sonar-scan@v6
         with:
           sonar-token: ${{ secrets.SONAR_TOKEN }}

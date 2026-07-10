@@ -1,9 +1,10 @@
-name: Reusable App CI
+name: Reusable Node CI
 
-# Reusable workflow (v6) — Node PR gate. Parallel jobs gated by an aggregate
-# `ci-success` job; service callers require ONLY `app-ci / ci-success`. v6 adds the
-# gitleaks + trivy-fs security gates (IRD-021) to match reusable-java-ci, and bumps
-# internal composite refs @v4 → @v6 so the whole tag is self-consistent.
+# Reusable workflow (v6) — Node PR gate (the Node twin of reusable-java-ci). Parallel jobs
+# gated by an aggregate `ci-success` job; service callers require ONLY `app-ci / ci-success`
+# (the aggregate check name comes from the caller JOB id `app-ci`, not this filename — so this
+# rename does not touch any ruleset). v6 adds the gitleaks + trivy-fs security gates (IRD-021)
+# and bumps internal composite refs @v4 → @v6 so the whole tag is self-consistent.
 # Composites referenced by ABSOLUTE @v6 path (./ 404s when called externally).
 
 on:
@@ -49,7 +50,7 @@ jobs:
         uses: proops-task-management/cicd-platform/.github/actions/gitleaks-scan@v6
 
       - name: Build app (lint + test + build)
-        uses: proops-task-management/cicd-platform/.github/actions/build-app@v6
+        uses: proops-task-management/cicd-platform/.github/actions/build-node@v6
         with:
           node-version: ${{ inputs.runtime-version }}
           working-directory: ${{ inputs.working-directory }}
@@ -72,7 +73,9 @@ jobs:
 
   sonar:
     needs: build
-    if: ${{ inputs.enable-sonar }}
+    # Skip on Dependabot PRs: secrets are withheld from Dependabot runs (empty SONAR_TOKEN) and a
+    # dep bump has no new first-party code to gate. A skipped sonar is not a failure for ci-success.
+    if: ${{ inputs.enable-sonar && github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -8,7 +8,7 @@ change cuts the next major tag and callers upgrade deliberately (IRD-015).
 ## Composite actions (`.github/actions/`)
 | Action | Purpose |
 |---|---|
-| `build-app` | Node: setup-node + npm ci + lint + test + build |
+| `build-node` | Node: setup-node + npm ci + lint + test + build |
 | `build-java` | Java: setup-java (Temurin) + Maven cache + `mvn -B verify` (unit + Testcontainers `*IT`) |
 | `docker-build-push` | buildx build → GHCR, `:sha` + `:latest`, push gated by `push` input (linux/amd64 — Day-35) |
 | `sonar-scan` | SonarCloud analysis with blocking quality gate |
@@ -18,7 +18,7 @@ change cuts the next major tag and callers upgrade deliberately (IRD-015).
 ## Reusable workflows (`.github/workflows/`, `on: workflow_call`)
 | Workflow | Purpose |
 |---|---|
-| `reusable-app-ci.yml` | Node PR gate → `app-ci / ci-success` (build + sonar + image + gitleaks + trivy fs) |
+| `reusable-node-ci.yml` | Node PR gate → `app-ci / ci-success` (build + sonar + image + gitleaks + trivy fs) |
 | `reusable-java-ci.yml` | Java PR gate → `app-ci / ci-success` (mvn verify + sonar + gitleaks + trivy fs) |
 | `reusable-build.yml` | merge-time build-once (`stack: node\|java`) → GHCR `:sha` + trivy image + GitOps `bump-dev` |
 | `reusable-iac.yml` | terraform fmt/validate/plan, apply/destroy gated by `action` input (iac-platform) |
@@ -36,7 +36,7 @@ overlay. **Deploy is not CI's job** — Argo CD pulls from the `deploy` repo (IR
 - Java (`api-gateway`, `user-service`, `task-service`, `notification-service`):
   `pr-opened.yml` → `reusable-java-ci.yml@v6` · `pr-merged.yml` → `reusable-build.yml@v6` (`stack: java`) ·
   `why-failed.yml` → `reusable-why-failed.yml@v6`
-- Node (`frontend-service`): same trio with `reusable-app-ci.yml@v6` / `stack: node`.
+- Node (`frontend-service`): same trio with `reusable-node-ci.yml@v6` / `stack: node`.
 
 ## Versioning
 Tagged `@v6`. Service callers pin to the tag so platform commits cannot silently break them.

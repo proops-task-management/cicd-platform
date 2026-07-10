@@ -1,4 +1,4 @@
-name: "Build App"
+name: "Build Node"
 description: "Set up Node.js, install dependencies, lint, test (with coverage), and build"
 
 # Composite action — step-level reuse. Runs INSIDE the caller's job/runner.
