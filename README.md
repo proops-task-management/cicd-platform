@@ -21,7 +21,7 @@ change cuts the next major tag and callers upgrade deliberately (IRD-015).
 | `reusable-app-ci.yml` | Node PR gate → `app-ci / ci-success` (build + sonar + image + gitleaks + trivy fs) |
 | `reusable-java-ci.yml` | Java PR gate → `app-ci / ci-success` (mvn verify + sonar + gitleaks + trivy fs) |
 | `reusable-build.yml` | merge-time build-once (`stack: node\|java`) → GHCR `:sha` + trivy image + GitOps `bump-dev` |
-| `reusable-iac.yml` | terraform fmt/validate/plan, apply/destroy gated by `action` input (platform-iac) |
+| `reusable-iac.yml` | terraform fmt/validate/plan, apply/destroy gated by `action` input (iac-platform) |
 | `reusable-why-failed.yml` | Agent B relay: `/why-failed` PR comment → POST fleet `/ci-failed` (IRD-022) |
 
 ## The @v6 delivery contract (CI-agnostic)
