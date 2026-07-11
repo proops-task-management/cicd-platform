@@ -18,8 +18,8 @@ change cuts the next major tag and callers upgrade deliberately (IRD-015).
 ## Reusable workflows (`.github/workflows/`, `on: workflow_call`)
 | Workflow | Purpose |
 |---|---|
-| `reusable-node-ci.yml` | Node PR gate → `app-ci / ci-success` (build + sonar + image + gitleaks + trivy fs) |
-| `reusable-java-ci.yml` | Java PR gate → `app-ci / ci-success` (mvn verify + sonar + gitleaks + trivy fs) |
+| `reusable-node-ci.yml` | Node PR gate → `app-ci / ci-success` (build + sonar + gitleaks + trivy fs + **image build + trivy image**, `push:false`) |
+| `reusable-java-ci.yml` | Java PR gate → `app-ci / ci-success` (mvn verify + sonar + gitleaks + trivy fs + **image build + trivy image** at PR, `push:false` — shift-left, MIN-8) |
 | `reusable-build.yml` | merge-time build-once (`stack: node\|java`) → GHCR `:sha` + trivy image + GitOps `bump-dev` |
 | `reusable-iac.yml` | terraform fmt/validate/plan, apply/destroy gated by `action` input (iac-platform) |
 | `reusable-why-failed.yml` | Agent B relay: `/why-failed` PR comment → POST fleet `/ci-failed` (IRD-022) |
