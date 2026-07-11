@@ -52,6 +52,10 @@ runs:
       with:
         context: .
         push: ${{ inputs.push }}
+        # When NOT pushing (PR gate), load the image into the local docker daemon so a
+        # follow-up `trivy image` can scan it. Only works for a single platform — safe here
+        # because CI is amd64-only (ADR-011). On merge (push=true) load is a no-op.
+        load: ${{ inputs.push != 'true' }}
         platforms: ${{ inputs.platforms }}
         tags: |
           ${{ inputs.registry }}/${{ inputs.image-name }}:${{ inputs.image-tag }}

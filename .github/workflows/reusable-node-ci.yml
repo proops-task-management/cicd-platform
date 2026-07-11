@@ -98,6 +98,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write          # NEW: trivy image SARIF upload → Security tab
     steps:
       - uses: actions/checkout@v4
       - name: Docker build + push (linux/amd64 GHCR)
@@ -109,6 +110,17 @@ jobs:
           push: ${{ inputs.push-image }}
           registry-username: ${{ secrets.REGISTRY_USERNAME || github.actor }}
           registry-password: ${{ secrets.REGISTRY_TOKEN || secrets.GITHUB_TOKEN }}
+
+      # Scan the image we just built (loaded locally when push:false — docker-build-push `load`).
+      # warn: base-layer CVEs are third-party — report to the Security tab, don't block (ADR-012).
+      - name: Trivy image scan (report — advisory, non-blocking)
+        uses: proops-task-management/cicd-platform/.github/actions/trivy-scan@v6
+        with:
+          scan-type: image
+          scan-ref: ghcr.io/${{ github.repository }}:${{ inputs.image-tag }}
+          scanners: vuln
+          sarif-category: trivy-image
+          policy: warn
 
   # Aggregate gate — the ONLY required check in the service ruleset. Add/remove
   # jobs above without ever touching the ruleset again. `if: always()` so it runs

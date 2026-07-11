@@ -5,6 +5,13 @@ name: Reusable Java CI
 # aggregate is the ONLY required status check in every service ruleset. Naming the caller
 # job `app-ci` makes the check resolve to `app-ci / ci-success` — identical name across
 # Node and Java repos, so one ruleset line covers all 5 services (IRD-015).
+#
+# INTENTIONAL asymmetry vs reusable-node-ci (do NOT "fix" into symmetry): Node splits
+# build/sonar/image into 3 jobs because its sonar job needs the coverage artifact from a
+# separate build job (jobs don't share a filesystem). Java keeps sonar as a STEP inside
+# `ci` because the maven workspace already holds target/classes + jacoco — running sonar
+# in-job avoids shipping a heavy `target/` artifact between jobs. Only `image` is a
+# separate job (it re-builds via the Dockerfile, independent of the maven workspace).
 
 on:
   workflow_call:
@@ -67,18 +74,49 @@ jobs:
         with:
           sonar-token: ${{ secrets.SONAR_TOKEN }}
 
+  # Build the container at PR time (push:false) so a broken Dockerfile / a base-image that
+  # fails to compile (e.g. a JDK bump that breaks Lombok — MIN-8) is caught HERE, not post-merge.
+  # Node already did this (reusable-node-ci `image` job); this brings Java to parity. The image
+  # is loaded locally (docker-build-push `load`) then trivy-image scanned (warn — third-party
+  # base CVEs report, don't block; ADR-012). NOT pushed — the real push is the merge build.
+  image:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write      # trivy image SARIF upload → Security tab
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Docker build (push:false, loaded locally) — proves the Dockerfile builds
+        uses: proops-task-management/cicd-platform/.github/actions/docker-build-push@v6
+        with:
+          registry: ghcr.io
+          image-name: ${{ github.repository }}
+          image-tag: ${{ github.sha }}      # defaulted internally → the 4 Java callers don't change
+          push: false
+
+      - name: Trivy image scan (report — advisory, non-blocking)
+        uses: proops-task-management/cicd-platform/.github/actions/trivy-scan@v6
+        with:
+          scan-type: image
+          scan-ref: ghcr.io/${{ github.repository }}:${{ github.sha }}
+          scanners: vuln
+          sarif-category: trivy-image
+          policy: warn                # base-layer CVEs are third-party — report, don't block
+
   # Aggregate gate — the ONLY required check in the service ruleset. Add/remove steps
   # or jobs without ever editing a ruleset. `if: always()` so a skipped/failed upstream
   # is evaluated explicitly rather than silently passing.
   ci-success:
-    needs: [ci]
+    needs: [ci, image]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Fail unless the ci job succeeded
-        if: ${{ needs.ci.result != 'success' }}
+      - name: Fail if any required job did not succeed
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
         run: |
-          echo "ci=${{ needs.ci.result }} — a required job did not succeed."
+          echo "ci=${{ needs.ci.result }} image=${{ needs.image.result }} — a required job did not succeed."
           exit 1
       - name: Gate passed
-        run: echo "ci=${{ needs.ci.result }} — OK"
+        run: echo "ci=${{ needs.ci.result }} image=${{ needs.image.result }} — OK"
