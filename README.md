@@ -27,7 +27,7 @@ change cuts the next major tag and callers upgrade deliberately (IRD-015).
 ## The @v6 delivery contract (CI-agnostic)
 `@v6` is a **contract**, not "the GitHub Actions pipeline" (ADR-010). Every engine produces the
 same 4 outputs: (1) build-once **linux/amd64** image tagged by full SHA (amd64-only in CI —
-Day-35 / ADR-011), (2) push to `ghcr.io/proops-task-management/<svc>:<sha>` (public), (3) gates
+Day-35 / ADR-011), (2) push to `ghcr.io/proops-task-management/<svc>:<sha>` (private; pulled via imagePullSecret — ADR-013), (3) gates
 pass (tests, Sonar, Trivy, gitleaks), (4) idempotent `bump-dev` commit to the `deploy` repo dev
 overlay. **Deploy is not CI's job** — Argo CD pulls from the `deploy` repo (IRD-017).
 `reusable-deploy.yml` (push-deploy) was **retired at v6**.
