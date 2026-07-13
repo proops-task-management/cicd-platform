@@ -97,13 +97,25 @@ jobs:
       # so target/ (java binaries) + coverage/ are fresh. NOT a gate: post-merge on main, so
       # qualitygate-wait=false (records, never fails) and continue-on-error=true so a Sonar or
       # token outage never blocks the image push / GitOps bump-dev.
-      - name: SonarCloud main-branch analysis (baseline refresh — non-blocking)
-        if: ${{ inputs.enable-sonar }}
+      # Stack-conditional: Node keeps the standalone scanner (correct for JS/TS, reads
+      # sonar-project.properties); Java uses SonarScanner for Maven (auto-derives java.libraries
+      # from the reactor, reads projectKey/org from the pom). Both non-blocking here (wait=false).
+      - name: SonarCloud main-branch analysis — Node (baseline refresh, non-blocking)
+        if: ${{ inputs.enable-sonar && inputs.stack == 'node' }}
         continue-on-error: true
         uses: proops-task-management/cicd-platform/.github/actions/sonar-scan@v6
         with:
           sonar-token: ${{ secrets.SONAR_TOKEN }}
           qualitygate-wait: "false"
+
+      - name: SonarCloud main-branch analysis — Java (baseline refresh, non-blocking)
+        if: ${{ inputs.enable-sonar && inputs.stack == 'java' }}
+        continue-on-error: true
+        uses: proops-task-management/cicd-platform/.github/actions/sonar-scan-maven@v6
+        with:
+          sonar-token: ${{ secrets.SONAR_TOKEN }}
+          qualitygate-wait: "false"
+          working-directory: ${{ inputs.working-directory }}
 
       - id: set-tag
         name: Compute image tag from commit SHA

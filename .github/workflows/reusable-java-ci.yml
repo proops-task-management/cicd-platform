@@ -68,9 +68,9 @@ jobs:
       # (`Secret source: Dependabot` → empty SONAR_TOKEN → auth fail), AND a dep bump has zero
       # new first-party code for Sonar to gate. build+test still runs (the real gate for a bump);
       # Trivy still reports the dependency CVEs. Net: no security loss. (ADR-012 gate-purpose rule.)
-      - name: SonarCloud scan
+      - name: SonarScanner for Maven
         if: ${{ inputs.enable-sonar && github.actor != 'dependabot[bot]' }}
-        uses: proops-task-management/cicd-platform/.github/actions/sonar-scan@v6
+        uses: proops-task-management/cicd-platform/.github/actions/sonar-scan-maven@v6
         with:
           sonar-token: ${{ secrets.SONAR_TOKEN }}
 

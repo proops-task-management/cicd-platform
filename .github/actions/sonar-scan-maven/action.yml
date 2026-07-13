@@ -1,0 +1,49 @@
+name: "SonarCloud Scan (Maven)"
+description: >
+  Java SonarCloud analysis via SonarScanner for Maven (`mvn sonar:sonar`). Unlike the standalone
+  scanner (sonar-scan), the Maven scanner auto-derives sonar.java.libraries / test.libraries /
+  binaries from the reactor classpath — fixing the "Missing sonar.java.libraries" warning and
+  enabling rules that need dependency bytecode (MIN-35). Reads sonar.projectKey / sonar.organization
+  from the service pom (no sonar-project.properties needed).
+
+# Composite — the Java twin of `sonar-scan`. Composites have no `secrets` context, so the token
+# comes in as an input (the reusable workflow forwards secrets.SONAR_TOKEN).
+#
+# PRECONDITION: MUST run after `build-java` IN THE SAME JOB — it reuses that step's JDK 21 (setup-java
+# persists JAVA_HOME/PATH for the job) and its `target/` (compiled classes + jacoco.exec/xml). It does
+# NOT recompile; `sonar:sonar` analyzes the existing build output. The Java CI intentionally fuses
+# build+sonar into one job for exactly this reason (see reusable-java-ci header).
+
+inputs:
+  sonar-token:
+    description: "SonarCloud token"
+    required: true
+  sonar-host-url:
+    description: "Sonar host URL"
+    required: false
+    default: "https://sonarcloud.io"
+  qualitygate-wait:
+    description: >
+      "true"  = wait for the quality gate and FAIL the job if it fails — the BLOCKING PR gate
+                (reusable-java-ci): sonar fails → ci-success fails → merge blocked.
+      "false" = fire-and-forget — the NON-BLOCKING main-branch baseline refresh (reusable-build,
+                post-merge): updates the main dashboard + New Code reference baseline, never fails.
+    required: false
+    default: "true"
+  working-directory:
+    description: "Maven project root (the pom.xml dir)"
+    required: false
+    default: "."
+
+runs:
+  using: "composite"
+  steps:
+    - name: SonarScanner for Maven
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        SONAR_TOKEN: ${{ inputs.sonar-token }}
+      run: |
+        mvn -B org.sonarsource.scanner.maven:sonar-maven-plugin:5.1.0.4751:sonar \
+          -Dsonar.host.url='${{ inputs.sonar-host-url }}' \
+          -Dsonar.qualitygate.wait='${{ inputs.qualitygate-wait }}'
