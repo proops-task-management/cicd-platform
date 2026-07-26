@@ -1,8 +1,14 @@
-name: Reusable IaC
+name: Reusable IaC (v6)
 
-# Reusable workflow — job-level reuse for Terraform. Called by service repos via:
-#   uses: proops-task-management/cicd-platform/.github/workflows/reusable-iac.yml@v1
-# One reusable workflow drives plan / apply / destroy via the `action` input.
+# Reusable workflow (v6) — the Terraform engine for iac-platform. Called by thin callers:
+#   uses: proops-task-management/cicd-platform/.github/workflows/reusable-iac.yml@v6
+# One workflow drives plan / apply / destroy via the `action` input. Auth is GitHub->AWS
+# OIDC only (NO stored AWS keys — IRD-015 §OIDC / DOP-015 AC-11-10): plan assumes the
+# read-only `gha-iac-plan` role, apply/destroy assume `gha-iac-apply`. On a PR it runs
+# fmt-check + tflint + `plan` and posts the plan as a PR comment (IRD-016 §IaC pipelines).
+#
+# Callers MUST grant the job:  permissions: { id-token: write, contents: read, pull-requests: write }
+# (a reusable workflow's effective permissions are capped by the caller's grant).
 
 on:
   workflow_call:
@@ -11,22 +17,26 @@ on:
         description: "plan | apply | destroy"
         type: string
         required: true
-      environment:
-        description: "dev | test | prod"
-        type: string
-        default: "dev"
       working-directory:
-        description: "Terraform root config directory"
+        description: "Terraform root config directory (e.g. envs/k3s-dev)"
         type: string
-        default: "iac/dev"
+        required: true
+      aws-role-arn:
+        description: "OIDC role ARN — gha-iac-plan for plan, gha-iac-apply for apply/destroy"
+        type: string
+        required: true
       aws-region:
         type: string
         default: "ap-southeast-1"
-    secrets:
-      AWS_ACCESS_KEY_ID:
-        required: true
-      AWS_SECRET_ACCESS_KEY:
-        required: true
+      terraform-version:
+        description: "Pinned Terraform version (IRD-013: >= 1.7, < 2.0)"
+        type: string
+        default: "1.9.8"
+
+permissions:
+  id-token: write         # request the OIDC token to assume the gha-iac-* role
+  contents: read          # checkout
+  pull-requests: write    # post the plan as a PR comment
 
 jobs:
   iac:
@@ -38,14 +48,20 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.9.8"
+          terraform_version: ${{ inputs.terraform-version }}
 
-      - name: Configure AWS credentials
+      # fmt-check gates on style before anything touches AWS (IRD-013). Recursive so a
+      # module change in a sibling dir is caught even when only a root is planned.
+      - name: Terraform fmt (check)
+        run: terraform fmt -check -recursive
+
+      # OIDC: short-lived credentials by assuming the scoped role. No secrets in the repo.
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ inputs.aws-role-arn }}
           aws-region: ${{ inputs.aws-region }}
+          role-session-name: gha-iac-${{ inputs.action }}-${{ github.run_id }}
 
       - name: Init
         working-directory: ${{ inputs.working-directory }}
@@ -55,17 +71,63 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         run: terraform validate
 
+      - name: Setup TFLint
+        if: inputs.action != 'destroy'
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.53.0
+
+      - name: TFLint
+        if: inputs.action != 'destroy'
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          tflint --init
+          tflint --chdir=. --recursive
+
+      # plan for both plan and apply actions. `-lock=false`: the read-only gha-iac-plan role
+      # has ReadOnlyAccess and cannot take the DynamoDB state lock; apply below keeps the lock
+      # (gha-iac-apply is RW). Safe because CI plan is a single, non-mutating run.
       - name: Plan
+        id: plan
         if: inputs.action == 'plan' || inputs.action == 'apply'
         working-directory: ${{ inputs.working-directory }}
-        run: terraform plan -no-color -out=tfplan
+        run: |
+          set -euo pipefail
+          LOCK_FLAG=""
+          [ "${{ inputs.action }}" = "plan" ] && LOCK_FLAG="-lock=false"
+          terraform plan -no-color -input=false $LOCK_FLAG -out=tfplan
+          terraform show -no-color tfplan > plan.txt
+
+      - name: Upload plan artifact
+        if: inputs.action == 'plan'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ github.run_id }}
+          path: |
+            ${{ inputs.working-directory }}/tfplan
+            ${{ inputs.working-directory }}/plan.txt
+          retention-days: 5
+
+      # Post the plan on the PR so review happens in the PR, and /review-plan (Agent C) has a
+      # plan to fetch. Truncated to stay under GitHub's 65 536-char comment limit.
+      - name: Comment plan on PR
+        if: inputs.action == 'plan' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          ROOT: ${{ inputs.working-directory }}
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          set -euo pipefail
+          { echo "### \`terraform plan\` — \`$ROOT\`"; echo; echo '<details><summary>Show plan</summary>'; echo; echo '```terraform'; head -c 60000 plan.txt; echo; echo '```'; echo '</details>'; echo; echo "_Review with \`/review-plan\` (Agent C, advisory) before merge._"; } > comment.md
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file comment.md
 
       - name: Apply
         if: inputs.action == 'apply'
         working-directory: ${{ inputs.working-directory }}
-        run: terraform apply -auto-approve -no-color tfplan
+        run: terraform apply -no-color -input=false -auto-approve tfplan
 
       - name: Destroy
         if: inputs.action == 'destroy'
         working-directory: ${{ inputs.working-directory }}
-        run: terraform destroy -auto-approve -no-color
+        run: terraform destroy -no-color -input=false -auto-approve
