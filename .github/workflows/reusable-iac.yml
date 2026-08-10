@@ -9,6 +9,10 @@ name: Reusable IaC (v6)
 #
 # Callers MUST grant the job:  permissions: { id-token: write, contents: read, pull-requests: write }
 # (a reusable workflow's effective permissions are capped by the caller's grant).
+#
+# Terraform variables reach this workflow ONLY through the optional `tf-vars` secret
+# (multi-line KEY=value -> TF_VAR_<key>) — *.tfvars is gitignored and a reusable workflow
+# does not inherit the caller's env, so there is no other channel (MIN-58).
 
 on:
   workflow_call:
@@ -32,6 +36,13 @@ on:
         description: "Pinned Terraform version (IRD-013: >= 1.7, < 2.0)"
         type: string
         default: "1.9.8"
+    secrets:
+      tf-vars:
+        description: >-
+          Optional multi-line `KEY=value`. Each line is exported as TF_VAR_<key> for
+          plan/apply/destroy. Deliberately GENERIC — the caller owns the variable NAME,
+          this workflow only transports it (MIN-58).
+        required: false
 
 permissions:
   id-token: write         # request the OIDC token to assume the gha-iac-* role
@@ -49,6 +60,63 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ inputs.terraform-version }}
+
+      # --- Terraform variable channel (MIN-58) -------------------------------
+      # The caller may pass a multi-line `KEY=value` secret; each line becomes
+      # TF_VAR_<key> for every terraform step below.
+      #
+      # WHY A SECRET, NOT AN INPUT: workflow inputs are echoed in the run header and
+      # are never masked. The first consumer is `admin_cidr` (the operator /32 allowed
+      # on the k3s API) — not a credential, but it must not be printed.
+      #
+      # WHY GENERIC, NOT `admin-cidr`: this workflow is the shared platform engine for
+      # every Terraform root in every caller repo. A k3s-specific concept must not leak
+      # into the platform contract, so the CALLER composes the variable name and this
+      # workflow only transports it (IRD-015 §reusable-iac.yml).
+      #
+      # WHY THE EXPLICIT ::add-mask::  GitHub auto-masks only the EXACT string it was
+      # handed — here the whole `admin_cidr=1.2.3.4/32` line. What Terraform then prints
+      # into plan.txt and the PR comment is the BARE value, a different string the
+      # automatic mask does not cover. Masking each parsed value is what actually hides it.
+      #
+      # WHY IT IS SAFE TO PASS THE SAME SECRET TO EVERY ROOT: a root that does not declare
+      # a variable simply IGNORES its TF_VAR_ (unlike `-var`, which errors, or a .tfvars
+      # file, which warns). Callers therefore pass it uniformly rather than per-root —
+      # which `iac-manual` must do anyway, since it picks its root from a runtime input.
+      #
+      # NOTE: the `secrets` context is NOT available in a step-level `if:`, so the
+      # emptiness check lives inside the script, not as a step condition.
+      - name: Export tf-vars as TF_VAR_*
+        env:
+          TF_VARS: ${{ secrets.tf-vars }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TF_VARS:-}" ]; then
+            echo "No tf-vars secret supplied — variables come from defaults / terraform.tfvars only."
+            exit 0
+          fi
+          n=0
+          while IFS= read -r raw || [ -n "$raw" ]; do
+            n=$((n + 1))
+            line="${raw%$'\r'}"                       # tolerate CRLF-pasted secrets
+            case "$line" in ''|'#'*) continue ;; esac  # blank + comment lines
+            key="${line%%=*}"                          # split on the FIRST '=' only, so
+            val="${line#*=}"                           # a value may itself contain '='
+            if [ "$key" = "$line" ]; then
+              echo "::error::tf-vars line $n is not in KEY=value form"; exit 1
+            fi
+            # Never echo the key on failure — a malformed line may BE the value.
+            if ! printf '%s' "$key" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$'; then
+              echo "::error::tf-vars line $n has an invalid Terraform variable name"; exit 1
+            fi
+            echo "::add-mask::${val}"                  # mask BEFORE it can reach any log
+            {
+              echo "TF_VAR_${key}<<__TFVARS_EOF__"     # heredoc form: a value containing a
+              echo "${val}"                            # newline cannot inject a second var
+              echo "__TFVARS_EOF__"
+            } >> "$GITHUB_ENV"
+            echo "exported TF_VAR_${key}"              # log the NAME only, never the value
+          done <<< "$TF_VARS"
 
       # fmt-check gates on style before anything touches AWS (IRD-013). Recursive so a
       # module change in a sibling dir is caught even when only a root is planned.
