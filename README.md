@@ -52,6 +52,4 @@ Breaking change → cut `@v7`; each service upgrades deliberately. `@v5` retaine
 IRD-015 (this contract) · IRD-021 (security gates) · IRD-022 (agent fleet) · IRD-024 (Jenkins
 second engine) · ADR-010 (dual-CI decision).
 
-AKIAIOSFODNN7EXAMPLE
 
-AKIAIOSFODNN7EXAMPLE
