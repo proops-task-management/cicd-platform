@@ -23,5 +23,20 @@ runs:
         curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz" \
           | tar -xz gitleaks
         # --no-git: scan the checked-out tree as-is (robust on shallow PR checkouts);
-        # --redact: never print secret values; --exit-code 1: fail the job on a finding.
-        ./gitleaks detect --source . --no-git --redact --exit-code 1 --no-banner
+        # --exit-code 1: fail the job on a finding.
+        #
+        # -v and --redact are a PAIR and neither is optional (MIN-64):
+        #   --redact  hides the secret VALUE    -> a red build never becomes a wider leak.
+        #   -v        prints the LOCATION       -> File, Line, RuleID, Fingerprint.
+        # These are separable properties, not a trade-off. gitleaks prints the location
+        # NEXT TO a REDACTED value, so one run satisfies both. Without -v the entire
+        # operator-facing output is "WRN leaks found: N" — which file, which line and
+        # which rule are all withheld at the moment they matter most, because a committed
+        # credential's blast radius grows until it is found and rotated. That silence cost
+        # ~25 min across the only two real firings on record (TSG-010, 2 occurrences).
+        # Do NOT drop -v to shorten logs. Do NOT drop --redact to "see the secret".
+        #
+        # Deliberately NO --report-path: a report artifact is a new distribution surface
+        # for secret material and carries nothing the log does not already give. Decided
+        # 2026-08-12 (MIN-64); rationale in IRD-021 §gitleaks output contract.
+        ./gitleaks detect --source . --no-git --redact -v --exit-code 1 --no-banner
