@@ -1,7 +1,25 @@
 # Taskfile.yml — local task runner for cicd-platform (go-task: https://taskfile.dev)
 # Wraps the same gates CI runs, so a contributor can reproduce them locally before pushing.
 # Install go-task: `brew install go-task`. List tasks: `task` or `task --list`.
-# CI remains the enforced gate (IRD-021); this is the fast local mirror (IRD-014 hygiene).
+#
+# CI PARITY — per task, not as a blanket claim (MIN-60 form; MIN-63).
+# This header used to read "CI remains the enforced gate (IRD-021); this is the fast local mirror."
+# There was no CI on this repo to BE the enforced gate: every workflow was `on: workflow_call`, so
+# a pull request here ran nothing. The local hooks were not a mirror of an enforced gate, they were
+# the ONLY gate — and an optional one, since `task hooks` is per-clone and silently skippable.
+#
+#   task          | runs                        | enforced in CI by
+#   --------------|-----------------------------|--------------------------------------------
+#   secrets       | pre-commit run gitleaks     | self-ci: ./.github/actions/gitleaks-scan
+#   actionlint    | pre-commit run actionlint   | self-ci: the same hook, same file
+#   yamllint      | pre-commit run yamllint     | self-ci: the same hook, same file
+#   lint          | all three of the above      | self-ci (whole job)
+#   hooks         | pre-commit install          | nothing — per-clone, cannot be enforced remotely
+#
+# `hooks` is the honest row: nothing can force a contributor to install the hooks, which is
+# precisely why the CI counterpart has to exist. self-ci.yml is now the enforced gate this file
+# always claimed to mirror, and the required status check on "Protect main" (IRD-015 §Branch
+# ruleset) is what makes it enforcing rather than advisory.
 
 version: "3"
 

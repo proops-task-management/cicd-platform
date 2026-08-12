@@ -1,0 +1,113 @@
+name: self-ci
+
+# The self-gate for THIS repo (IRD-015 · IRD-021 · MIN-63).
+#
+# WHY IT EXISTS: until this file, cicd-platform's .github/workflows/ held five files whose `on:`
+# block was `workflow_call:` and nothing else — so a pull request to the repo that defines every
+# gate for 6 consumer repos / 19 caller workflows / 7 composite actions ran ZERO checks. Its own
+# .pre-commit-config.yaml and Taskfile.yml both asserted a CI enforcement that did not exist.
+# The gatekeeper was the only one not searched.
+#
+# WHY IT MATTERS MORE HERE THAN ANYWHERE ELSE: this repo releases through `@v6`, a MOVING TAG.
+# There is no gate between "merged to main" and "propagated to 19 caller workflows". In an ordinary
+# repo a defect waits for someone to consume it; here it is already consumed by the time anyone
+# notices. The specific failure mode is TSG-024, hit for real at D11: a permissions or syntax error
+# in a reusable workflow does NOT fail here (nothing runs — the PR is green because it is EMPTY),
+# it fails in the CONSUMER as `startup_failure`, in repos whose own code is fine, up to 19 at once.
+# A five-second actionlint run on this side catches it before the tag moves.
+#
+# NO `paths:` FILTER, DELIBERATELY. A secret can land in any file, and a broken workflow is only
+# ever one edit away. A gate behind a path filter is a gate that does not always fire — the MIN-60
+# defect — and this is the worst repo in the program to reproduce it in. Every PR, every push to
+# main, no filter, no excuses. (Same rule, same reasoning as iac-platform's secret-scan.yml/MIN-62.)
+#
+# WHY THE LOCAL PRE-COMMIT HOOKS ARE NOT ENOUGH: they are bypassable three ways, none of which
+# touch a developer machine — a clone that never ran `task hooks` (per-clone and silently optional,
+# IRD-014 §Local gate), `git commit --no-verify`, and an edit made through the GitHub web UI or by
+# an agent. This repo is MORE exposed on that last path than any other: it holds the OIDC role
+# wiring and every pipeline definition. A lint miss is a bug; a secret miss is a credential in
+# immutable git history, and no follow-up commit fixes that.
+#
+# REQUIRED STATUS CHECK: this workflow's single job id, `self-ci`, IS the check name the "Protect
+# main" ruleset requires (IRD-015 §Branch ruleset). Note it is ONE part, not the services' two-part
+# `app-ci / ci-success` — that form comes from a caller job invoking a reusable workflow's job, and
+# there is no nesting here. Renaming this job renames the required check and silently un-protects
+# main; if it must ever change, update the ruleset in the SAME commit.
+# This discharges the condition MIN-48 left dangling in July: *"add a required status check only if
+# it gains its own PR CI"* — correct at the time, but recorded in a closed issue body with no owner.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: self-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  self-ci:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---------------------------------------------------------------------------------------
+      # GATE 1 — gitleaks, via THIS REPO'S OWN composite action (MIN-63 AC-2).
+      #
+      # The `./` local path reference is load-bearing and is NOT a stylistic choice. A
+      # `proops-task-management/cicd-platform/.github/actions/gitleaks-scan@v6` reference — the form
+      # every consumer repo correctly uses — would resolve to the RELEASED tag, not to the code in
+      # the pull request. A PR that breaks the action would then go green here and only fail
+      # downstream, after `@v6` had already moved. Pointing at the working tree makes every
+      # cicd-platform PR a live regression test of the action six other repos depend on, exercised
+      # on the repo that owns it instead of only on its consumers.
+      #
+      # Version passed EXPLICITLY rather than inheriting the action's default (which is 8.18.4 today
+      # and would work): inheriting would put this repo's lockstep with its OWN .pre-commit-config
+      # rev at the mercy of an edit to a default. The pin belongs next to the rule it satisfies.
+      # This is the one tool whose version is duplicated — see the note on the lint gates below.
+      - name: Scan for committed secrets (gitleaks)
+        uses: ./.github/actions/gitleaks-scan
+        with:
+          version: "8.18.4"   # lockstep with .pre-commit-config.yaml rev v8.18.4
+
+      # ---------------------------------------------------------------------------------------
+      # GATES 2 + 3 — actionlint and yamllint, run THROUGH pre-commit (MIN-63 AC-3).
+      #
+      # Deliberately NOT `curl`-installed at a version literal written into this file. Doing that
+      # would make hook/CI lockstep a CONVENTION — two files a human must remember to edit
+      # together, enforced by nothing but a comment. That is the exact defect this issue exists to
+      # fix, reintroduced one layer up. Running the hooks themselves means the versions live in
+      # exactly ONE place (.pre-commit-config.yaml), so drift is not discouraged, it is structurally
+      # impossible. Same lesson as MIN-60's lint-brace-guard.sh: make the lockstep mechanical.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # pre-commit itself is pinned — an unpinned `pip install pre-commit` is an unreviewed
+      # dependency bump on every run, in the repo that gates six others.
+      - name: Install pre-commit
+        run: pip install pre-commit==3.8.0
+
+      # Hook environments are rebuilt from the pinned revs on a cache miss; the key includes the
+      # config hash, so bumping a rev invalidates the cache automatically rather than silently
+      # reusing the old tool.
+      - name: Cache pre-commit environments
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-py3.12-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      # `!cancelled()` on both lint steps is deliberate: it lets every gate report even when an
+      # earlier one has already failed, so ONE run yields the COMPLETE finding list rather than
+      # only the first failure. That matters most on the very first execution — the baseline across
+      # 5 reusable workflows + 7 composite actions that have never been linted in CI (AC-4). The job
+      # still fails if any step fails; this changes what gets REPORTED, never what passes.
+      - name: Validate workflow syntax + expressions (actionlint)
+        if: ${{ !cancelled() }}
+        run: pre-commit run actionlint --all-files --show-diff-on-failure
+
+      - name: Lint YAML style (yamllint)
+        if: ${{ !cancelled() }}
+        run: pre-commit run yamllint --all-files --show-diff-on-failure
