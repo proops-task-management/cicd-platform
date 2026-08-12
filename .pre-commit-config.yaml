@@ -1,7 +1,31 @@
 # .pre-commit-config.yaml — cicd-platform @v6
 # Local pre-commit gate (Day 3). Lints workflow/action YAML and blocks committed
 # secrets before they reach CI or history. Install once: `pre-commit install`.
-# Pairs with the in-CI gitleaks + actionlint steps (IRD-021) — same tools, earlier catch.
+#
+# CI PARITY — stated per tool, not as a blanket claim (MIN-60 form; MIN-63).
+# This header used to read "Pairs with the in-CI gitleaks + actionlint steps (IRD-021) — same
+# tools, earlier catch." That was FALSE, and falser here than anywhere else: those steps live in
+# reusable-java-ci / reusable-node-ci, workflows this repo SERVES to the 5 service repos. They ran
+# on the consumers, never on this repo's own pull requests. Until MIN-63 every workflow here was
+# `on: workflow_call` and nothing else, so a PR to the repo defining every other repo's gates ran
+# ZERO checks. The claim did not merely overstate the parity — there was no CI on this side at all.
+#
+#   hook        | in-CI counterpart                    | pinned in lockstep?
+#   ------------|--------------------------------------|----------------------------------------
+#   gitleaks    | self-ci: step 1, OWN composite action | yes — 8.18.4 (duplicated; see below)
+#   actionlint  | self-ci: `pre-commit run actionlint`  | STRUCTURAL — CI runs THIS file
+#   yamllint    | self-ci: `pre-commit run yamllint`    | STRUCTURAL — CI runs THIS file
+#
+# The last two rows are a stronger guarantee than a matching version number. self-ci.yml does not
+# reinstall those tools at a pinned literal — it invokes these hooks, so the revs below are the
+# ONLY place either version exists. Drift is not discouraged, it is impossible. (Contrast
+# iac-platform, where CI installs its own copies and the pins must be kept equal by hand.)
+#
+# gitleaks is the one exception, and deliberately: self-ci.yml runs it through this repo's own
+# ./.github/actions/gitleaks-scan so that every PR is a live regression test of the composite
+# action six repos depend on. That path cannot go through pre-commit, so its version IS duplicated
+# — passed explicitly in self-ci.yml rather than inherited from the action's default.
+# Bumping the gitleaks rev below MUST bump self-ci.yml in the same commit (the TSG-020 lesson).
 repos:
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.18.4
