@@ -26,8 +26,12 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # v8 (MIN-41): v4 carried CVE-2025-58178 (command injection via `args`). Since v6 the action
+    # is JavaScript and parses `args` itself instead of handing them to a shell — quote WHOLE
+    # arguments that contain spaces ("-Dsonar.projectName=My Project"), not just the value.
+    # v8 also verifies the downloaded scanner's GPG signature by default; leave it on.
     - name: SonarCloud Scan
-      uses: SonarSource/sonarqube-scan-action@v4
+      uses: SonarSource/sonarqube-scan-action@v8
       with:
         args: >
           -Dsonar.qualitygate.wait=${{ inputs.qualitygate-wait }}

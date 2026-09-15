@@ -44,7 +44,7 @@ jobs:
       contents: read
       security-events: write          # NEW (v6): trivy SARIF upload → Security tab
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Scan for committed secrets (gitleaks)   # NEW (v6) — IRD-021
         uses: proops-task-management/cicd-platform/.github/actions/gitleaks-scan@v6
@@ -65,7 +65,7 @@ jobs:
           policy: warn                # third-party CVEs: report, don't block (ADR-012)
 
       - name: Upload coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: ${{ inputs.working-directory }}/coverage/
@@ -78,12 +78,12 @@ jobs:
     if: ${{ inputs.enable-sonar && github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history so SonarCloud can compute "new code" (Day 26 lesson).
           fetch-depth: 0
       - name: Download coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage
           path: coverage/
@@ -100,7 +100,7 @@ jobs:
       packages: write
       security-events: write          # NEW: trivy image SARIF upload → Security tab
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Docker build + push (linux/amd64 GHCR)
         uses: proops-task-management/cicd-platform/.github/actions/docker-build-push@v6
         with:

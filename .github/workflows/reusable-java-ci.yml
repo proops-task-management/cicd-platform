@@ -42,7 +42,7 @@ jobs:
       contents: read
       security-events: write      # trivy SARIF upload → Security tab
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0          # full history so SonarCloud computes "new code" (Day 26)
 
@@ -86,7 +86,7 @@ jobs:
       contents: read
       security-events: write      # trivy image SARIF upload → Security tab
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Docker build (push:false, loaded locally) — proves the Dockerfile builds
         uses: proops-task-management/cicd-platform/.github/actions/docker-build-push@v6

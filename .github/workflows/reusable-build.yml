@@ -74,7 +74,7 @@ jobs:
     outputs:
       image-tag: ${{ steps.set-tag.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0          # full history so SonarCloud computes "new code" on main (Day 26)
 
@@ -172,7 +172,7 @@ jobs:
 
       - name: Checkout deploy repo
         if: ${{ steps.guard.outputs.enabled == 'true' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ inputs.project-name }}/deploy
           token: ${{ secrets.DEPLOY_REPO_TOKEN }}

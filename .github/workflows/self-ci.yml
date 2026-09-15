@@ -50,7 +50,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # ---------------------------------------------------------------------------------------
       # GATE 1 — gitleaks, via THIS REPO'S OWN composite action (MIN-63 AC-2).
@@ -81,7 +81,7 @@ jobs:
       # fix, reintroduced one layer up. Running the hooks themselves means the versions live in
       # exactly ONE place (.pre-commit-config.yaml), so drift is not discouraged, it is structurally
       # impossible. Same lesson as MIN-60's lint-brace-guard.sh: make the lockstep mechanical.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -94,7 +94,7 @@ jobs:
       # config hash, so bumping a rev invalidates the cache automatically rather than silently
       # reusing the old tool.
       - name: Cache pre-commit environments
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ runner.os }}-py3.12-${{ hashFiles('.pre-commit-config.yaml') }}
