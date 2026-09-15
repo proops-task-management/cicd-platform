@@ -1,0 +1,28 @@
+# Dependabot for cicd-platform (IRD-015 §Dependabot standard · MIN-41).
+#
+# WHY THIS FILE EXISTS: every other repo pins @v6 of THIS repo, so the action versions pinned
+# here are inherited by all 6 consumers. With no bot here, nothing ever proposed a bump:
+# sonarqube-scan-action@v4 (CVE-2025-58178) and 15 Node-20 actions sat untouched for two months
+# after they were first flagged (MIN-40 → MIN-41). IRD-015 already required Dependabot in "all
+# repos"; the one repo whose pins everyone inherits was the one without it.
+#
+# WHY TWO DIRECTORIES: "/" only covers .github/workflows/. Composite actions live in
+# .github/actions/<name>/action.yml and are invisible to Dependabot unless listed explicitly.
+#
+# WHY MAJORS ARE NOT GROUPED: a major bump here reaches every consumer the moment @v6 moves, so
+# each one is a deliberate, individually reviewed change (release notes read, v6.x cut). With
+# @vN major-tag pins only majors produce PRs at all; the minor/patch group becomes active once
+# third-party actions are SHA-pinned (MIN-41 follow-up).
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directories:
+      - "/"
+      - "/.github/actions/*"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
