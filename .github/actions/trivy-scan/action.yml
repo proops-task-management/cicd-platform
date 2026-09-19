@@ -47,7 +47,7 @@ runs:
     # Cache the Trivy vuln DB so the step stays < 1 min (IRD-021). Keyed by run so
     # the DB refreshes but is reused across passes/reruns via restore-keys.
     - name: Cache Trivy DB
-      uses: actions/cache@v6
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ github.workspace }}/.trivy-cache
         key: trivy-db-${{ inputs.scan-type }}-${{ github.run_id }}
@@ -57,7 +57,7 @@ runs:
     # Pass 1 — produce SARIF, NEVER fail (exit-code 0). Guarantees the Security tab
     # always gets the results, even when pass 2 is about to block the build.
     - name: Trivy ${{ inputs.scan-type }} scan → SARIF (report)
-      uses: aquasecurity/trivy-action@v0.36.0
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
       with:
         scan-type: ${{ inputs.scan-type }}
         scan-ref: ${{ inputs.scan-ref }}
@@ -71,7 +71,7 @@ runs:
         cache-dir: ${{ github.workspace }}/.trivy-cache
 
     - name: Upload SARIF to the Security tab
-      uses: github/codeql-action/upload-sarif@v4
+      uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
       if: ${{ always() }}             # upload even if a later step fails
       with:
         sarif_file: "trivy-results.sarif"
@@ -82,7 +82,7 @@ runs:
     #   warn  → show everything (incl. unfixed), exit-code 0 (never fails) — DevSecOps detects+reports;
     #           remediation is the app team's backlog (ADR-012).
     - name: Trivy ${{ inputs.scan-type }} scan → ${{ inputs.policy == 'warn' && 'report (Warn, non-blocking)' || 'gate (Block on fixable HIGH/CRITICAL)' }}
-      uses: aquasecurity/trivy-action@v0.36.0
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
       with:
         scan-type: ${{ inputs.scan-type }}
         scan-ref: ${{ inputs.scan-ref }}

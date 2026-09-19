@@ -50,7 +50,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # ---------------------------------------------------------------------------------------
       # GATE 1 — gitleaks, via THIS REPO'S OWN composite action (MIN-63 AC-2).
@@ -81,7 +81,7 @@ jobs:
       # fix, reintroduced one layer up. Running the hooks themselves means the versions live in
       # exactly ONE place (.pre-commit-config.yaml), so drift is not discouraged, it is structurally
       # impossible. Same lesson as MIN-60's lint-brace-guard.sh: make the lockstep mechanical.
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
@@ -94,7 +94,7 @@ jobs:
       # config hash, so bumping a rev invalidates the cache automatically rather than silently
       # reusing the old tool.
       - name: Cache pre-commit environments
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ runner.os }}-py3.12-${{ hashFiles('.pre-commit-config.yaml') }}
@@ -111,3 +111,21 @@ jobs:
       - name: Lint YAML style (yamllint)
         if: ${{ !cancelled() }}
         run: pre-commit run yamllint --all-files --show-diff-on-failure
+
+      # ---------------------------------------------------------------------------------------
+      # GATE 4 — action pins (MIN-65). Third-party `uses:` must be a full commit SHA plus a
+      # `# vX.Y.Z` comment; first-party cicd-platform@v6 refs are exempt (the moving tag IS the
+      # release mechanism, IRD-015 §Rules); `./` local refs are exempt.
+      #
+      # WHY IT IS A GATE AND NOT A CONVENTION: the pins in this repo are inherited by 6 consumer
+      # repos the moment `@v6` moves, and they run in jobs that hold the gha-iac-apply AWS role
+      # and a GHCR packages:write token. A tag is mutable, so an unpinned ref is new code
+      # executing with those credentials and NO diff here. GitHub's own SHA-pinning policy cannot
+      # express our first-party exemption (it exempts reusable workflows, not actions, and
+      # resolves under the CALLER's policy — see AC-8), so the rule is enforced here.
+      #
+      # The `./` reference is load-bearing for the same reason as gitleaks above: the checker is
+      # exercised on the pull request that changes it, not only after `@v6` has already moved.
+      - name: Check action pins (MIN-65)
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/check-action-pins
