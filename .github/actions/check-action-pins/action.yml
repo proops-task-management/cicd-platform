@@ -1,0 +1,23 @@
+name: "Check Action Pins"
+description: "Fail unless every `uses:` is ./local, first-party @v6, or a 40-char commit SHA + `# vX.Y.Z` (IRD-015 §Rules, MIN-65)"
+
+# Composite action — the CI half of the MIN-65 enforcer. The pre-commit hook
+# (.pre-commit-hooks.yaml, id: check-action-pins) execs the SAME script, so the local
+# gate and CI cannot disagree: there is one implementation, not two copies to keep
+# in sync (the MIN-60 lint-brace-guard.sh pattern).
+#
+# Consumed two ways, both correct:
+#   * self-ci.yml here      -> `./.github/actions/check-action-pins`  (working-tree copy,
+#     so a PR that breaks the checker fails on the PR that breaks it, not downstream)
+#   * iac-platform          -> `...@v6` (the released form every consumer repo uses)
+#
+# `github.action_path` resolves to wherever the action was checked out, while the
+# working directory stays the CALLER's workspace — so the script lints the caller's
+# .github/ tree with this repo's implementation.
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check action pins (third-party must be SHA + version comment)
+      shell: bash
+      run: "${{ github.action_path }}/check-action-pins.sh"

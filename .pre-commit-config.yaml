@@ -10,11 +10,12 @@
 # `on: workflow_call` and nothing else, so a PR to the repo defining every other repo's gates ran
 # ZERO checks. The claim did not merely overstate the parity — there was no CI on this side at all.
 #
-#   hook        | in-CI counterpart                    | pinned in lockstep?
-#   ------------|--------------------------------------|----------------------------------------
-#   gitleaks    | self-ci: step 1, OWN composite action | yes — 8.18.4 (duplicated; see below)
-#   actionlint  | self-ci: `pre-commit run actionlint`  | STRUCTURAL — CI runs THIS file
-#   yamllint    | self-ci: `pre-commit run yamllint`    | STRUCTURAL — CI runs THIS file
+#   hook              | in-CI counterpart                            | pinned in lockstep?
+#   ------------------|----------------------------------------------|--------------------------
+#   gitleaks          | self-ci: step 1, OWN composite action        | yes — 8.18.4 (duplicated)
+#   actionlint        | self-ci: `pre-commit run actionlint`         | STRUCTURAL — CI runs THIS file
+#   yamllint          | self-ci: `pre-commit run yamllint`           | STRUCTURAL — CI runs THIS file
+#   check-action-pins | self-ci: ./.github/actions/check-action-pins | STRUCTURAL — same script (MIN-65)
 #
 # The last two rows are a stronger guarantee than a matching version number. self-ci.yml does not
 # reinstall those tools at a pinned literal — it invokes these hooks, so the revs below are the
@@ -42,3 +43,18 @@ repos:
     rev: v1.7.1
     hooks:
       - id: actionlint             # validates .github/workflows/*.yml syntax + expressions
+
+  # MIN-65 — actionlint validates SYNTAX, not SUPPLY CHAIN: `uses: actions/checkout@v7` is
+  # perfectly valid YAML and a perfectly mutable reference. This hook is the missing half.
+  #
+  # `repo: local` is deliberate: this hook and the `check-action-pins` composite action that
+  # self-ci runs exec the SAME script, so local and CI cannot drift — one implementation, not
+  # two pinned copies (the MIN-60 lint-brace-guard.sh pattern). iac-platform consumes the same
+  # script through .pre-commit-hooks.yaml in this repo, so all four call sites share one file.
+  - repo: local
+    hooks:
+      - id: check-action-pins
+        name: check-action-pins (MIN-65 — third-party actions must be SHA-pinned)
+        entry: .github/actions/check-action-pins/check-action-pins.sh
+        language: script
+        files: ^\.github/.*\.ya?ml$

@@ -1,0 +1,30 @@
+# .pre-commit-hooks.yaml — hooks THIS repo exports to the other repos in the program (MIN-65).
+#
+# WHY IT EXISTS: check-action-pins must run in both repos that pin third-party actions
+# (cicd-platform, iac-platform) and in both places (pre-commit + CI). Copying the script into
+# each repo would create exactly the drift MIN-65 exists to prevent — two implementations that
+# silently diverge. Instead there is ONE script, consumed three ways:
+#
+#   caller                      | how it runs the script
+#   ----------------------------|--------------------------------------------------------
+#   cicd-platform pre-commit    | repo: local  -> .github/actions/check-action-pins/...
+#   cicd-platform self-ci       | ./.github/actions/check-action-pins (composite, working tree)
+#   iac-platform pre-commit     | repo: <this repo>, rev: v6.7 (this file)
+#   iac-platform action-pins.yml| .../check-action-pins@v6 (composite, released)
+#
+# NOTE ON `rev:` — pre-commit pins a consumer to an IMMUTABLE tag (v6.7), while CI consumes the
+# moving @v6. That asymmetry is deliberate: pre-commit resolves a git ref at install time and
+# caches it, so a moving tag would leave each laptop on whatever @v6 meant the day it was
+# installed — a silent, per-machine version. An explicit rev is visible in a diff. Dependabot
+# does not update pre-commit revs, so bump it by hand when @v6 moves (same rule as the gitleaks
+# version duplicated in self-ci.yml).
+#
+# Cloning this repo from a laptop needs git credentials (it is private) — `gh auth login`
+# provides them via the credential helper. CI does not clone it: it consumes the composite
+# action through the normal Actions resolution path.
+- id: check-action-pins
+  name: check-action-pins (MIN-65 — third-party actions must be SHA-pinned + version-commented)
+  description: "Fails on any `uses:` that is not ./local, first-party @v6, or owner/repo@<40-hex> # vX.Y.Z"
+  entry: .github/actions/check-action-pins/check-action-pins.sh
+  language: script
+  files: ^\.github/.*\.ya?ml$

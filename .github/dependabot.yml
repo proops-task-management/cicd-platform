@@ -10,9 +10,14 @@
 # .github/actions/<name>/action.yml and are invisible to Dependabot unless listed explicitly.
 #
 # WHY MAJORS ARE NOT GROUPED: a major bump here reaches every consumer the moment @v6 moves, so
-# each one is a deliberate, individually reviewed change (release notes read, v6.x cut). With
-# @vN major-tag pins only majors produce PRs at all; the minor/patch group becomes active once
-# third-party actions are SHA-pinned (MIN-41 follow-up).
+# each one is a deliberate, individually reviewed change (release notes read, v6.x cut).
+#
+# WHY THE MINOR/PATCH GROUP IS NOW LIVE (MIN-65): every third-party action is pinned to a full
+# commit SHA with a trailing `# vX.Y.Z` comment. Under the old @vN major-tag pins a minor or patch
+# release never produced a PR — the tag moved underneath us with no diff in this repo, which is
+# exactly how a REPOINTED tag would also have arrived (tj-actions, trivy-action). Now every release
+# is a reviewable diff: Dependabot bumps the SHA and the version comment together, batched weekly
+# into one `all-minor-patch` PR (group name per IRD-015 §Dependabot standard).
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -22,7 +27,7 @@ updates:
     schedule:
       interval: "weekly"
     groups:
-      actions-minor-patch:
+      all-minor-patch:
         update-types:
           - "minor"
           - "patch"
