@@ -195,7 +195,18 @@ jobs:
           set -euo pipefail
           git config user.name  "ci-bot"
           git config user.email "ci-bot@users.noreply.github.com"
-          kustomize edit set image "${{ inputs.service-name }}=${IMG}:${SHA}"
+          # `${IMG}:${SHA}`, NOT `${{ inputs.service-name }}=${IMG}:${SHA}` (MIN-72).
+          # `kustomize edit set image NAME=...` matches NAME against `images[].name`,
+          # which must be the image reference AS RENDERED in the manifest — the app
+          # chart emits `ghcr.io/<project>/<service>`, and the overlay's images entry
+          # is keyed on that same full path. A bare `<service>` matches nothing, so
+          # the old form APPENDED a second, inert entry and left the original tag in
+          # place: the job committed, pushed and went green while the deployed image
+          # never changed. A silent no-op that every downstream gate agreed with,
+          # because `:placeholder` is a perfectly valid, Kyverno-clean tag.
+          # The `<image>:<tag>` form sets newTag on the entry whose name matches, so
+          # it updates in place and stays idempotent across re-runs.
+          kustomize edit set image "${IMG}:${SHA}"
           if git -C "$GITHUB_WORKSPACE/deploy" diff --quiet; then
             echo "dev overlay already at ${SHA} — nothing to commit (idempotent)."
             exit 0
