@@ -81,10 +81,6 @@ runs:
         echo "downloading ${base}/${tarball}"
         curl -fsSL --retry 3 --retry-all-errors -o "${work}/${tarball}" "${base}/${tarball}"
         curl -fsSL --retry 3 --retry-all-errors -o "${work}/${sums}" "${base}/${sums}"
-        # >>> MIN-80 AC-2 TAMPER TEST — TEMPORARY, MUST BE REVERTED BEFORE MERGE <<<
-        # Appends one byte to the downloaded tarball = a tampered artifact. The checksum
-        # verification below MUST fail the step. Reverted in the very next commit.
-        printf 'x' >> "${work}/${tarball}"
 
         # Exactly ONE checksum entry for exactly this file name. An exact field match ($2 == f),
         # not grep: a substring match would also hit `<tarball>.sigstore.json`. Zero or several
