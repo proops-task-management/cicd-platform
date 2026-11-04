@@ -40,10 +40,66 @@ inputs:
       `fs`/`image`). Per the IRD-021 gate-policy matrix / ADR-012.
     required: false
     default: "block"
+  trivy-version:
+    description: >
+      Trivy release to install, from GitHub Releases, sha256-verified against that release's
+      checksums.txt. This action owns the install (not setup-trivy) — see the install step, TSG-036.
+    required: false
+    default: "v0.70.0"
 
 runs:
   using: "composite"
   steps:
+    # INSTALL TRIVY OURSELVES — TSG-036 / MIN-80 (2026-11-04).
+    # trivy-action's built-in path is setup-trivy → Trivy's contrib/install.sh, which downloads
+    # the tarball from get.trivy.dev. That host returns NXDOMAIN (aquasecurity/trivy#11537, closed
+    # NOT_PLANNED by a bot — no upstream fix), and install.sh runs curl SILENCED under `set -e`, so
+    # every cold install died with a bare "exit code 6" and no message. Warm `trivy-binary-*` caches
+    # hid it in the service repos; deploy was the first cold caller.
+    #
+    # Upstream invocation is the spec (IRD-021 licence-forced-reimplementation rule, MIN-64): same
+    # release, same binary, same checksums.txt. The ONLY divergence is the download host —
+    # github.com/aquasecurity/trivy/releases instead of get.trivy.dev. And unlike install.sh, every
+    # failure here is LOUD (-S shows curl's error) and the checksum check fails CLOSED.
+    - name: Install Trivy ${{ inputs.trivy-version }} from GitHub Releases (sha256-verified)
+      shell: bash
+      env:
+        TRIVY_VERSION: ${{ inputs.trivy-version }}
+      run: |
+        set -euo pipefail
+        v="${TRIVY_VERSION#v}"
+        case "${RUNNER_ARCH}" in
+          X64)   arch=64bit ;;
+          ARM64) arch=ARM64 ;;
+          *) echo "::error::trivy-scan: unsupported runner arch '${RUNNER_ARCH}'"; exit 1 ;;
+        esac
+        base="https://github.com/aquasecurity/trivy/releases/download/v${v}"
+        tarball="trivy_${v}_Linux-${arch}.tar.gz"
+        sums="trivy_${v}_checksums.txt"
+        work="$(mktemp -d)"
+
+        echo "downloading ${base}/${tarball}"
+        curl -fsSL --retry 3 --retry-all-errors -o "${work}/${tarball}" "${base}/${tarball}"
+        curl -fsSL --retry 3 --retry-all-errors -o "${work}/${sums}" "${base}/${sums}"
+
+        # Exactly ONE checksum entry for exactly this file name. An exact field match ($2 == f),
+        # not grep: a substring match would also hit `<tarball>.sigstore.json`. Zero or several
+        # matches fail closed rather than verifying against the wrong line.
+        line="$(awk -v f="${tarball}" '$2 == f' "${work}/${sums}")"
+        if [ "$(printf '%s\n' "${line}" | grep -c .)" -ne 1 ]; then
+          echo "::error::trivy-scan: expected exactly one checksum entry for ${tarball} in ${sums}"
+          exit 1
+        fi
+        (cd "${work}" && printf '%s\n' "${line}" | sha256sum --check --strict -)
+
+        bindir="${HOME}/.local/bin/trivy-bin"
+        install -d "${bindir}"
+        tar -xzf "${work}/${tarball}" -C "${work}" trivy
+        install -m 0755 "${work}/trivy" "${bindir}/trivy"
+        rm -rf "${work}"
+        echo "${bindir}" >> "${GITHUB_PATH}"
+        "${bindir}/trivy" --version
+
     # Cache the Trivy vuln DB so the step stays < 1 min (IRD-021). Keyed by run so
     # the DB refreshes but is reused across passes/reruns via restore-keys.
     - name: Cache Trivy DB
@@ -69,6 +125,9 @@ runs:
         severity: ${{ inputs.severity }}
         exit-code: "0"                 # report only — never fails here
         cache-dir: ${{ github.workspace }}/.trivy-cache
+        # Trivy is already on PATH from the install step above. setup-trivy's install path is
+        # dead (get.trivy.dev NXDOMAIN) — TSG-036, aquasecurity/trivy#11537. Do not remove.
+        skip-setup-trivy: "true"
 
     - name: Upload SARIF to the Security tab
       uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
@@ -95,6 +154,8 @@ runs:
         ignore-unfixed: ${{ inputs.policy == 'block' }}
         exit-code: ${{ inputs.policy == 'warn' && '0' || '1' }}
         cache-dir: ${{ github.workspace }}/.trivy-cache
+        # Same as pass 1 — Trivy comes from the install step; setup-trivy is dead (TSG-036).
+        skip-setup-trivy: "true"
 
     # Always surface the findings — to the log AND the job summary — even when pass 2
     # blocked (block policy), so the developer sees exactly what failed / was reported.
